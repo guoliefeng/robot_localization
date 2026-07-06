@@ -23,10 +23,17 @@
 
     <param name="imu_extrinsic_roll" value="0.0" />
     <param name="imu_extrinsic_pitch" value="0.0" />
-    <param name="imu_extrinsic_yaw" value="0.0" />
+    <param name="imu_extrinsic_yaw" value="-1.57079632679" />
     <param name="imu_use_orientation" value="false" />
     <param name="imu_use_angular_velocity" value="true" />
     <param name="imu_use_linear_acceleration" value="false" />
+
+    <param name="wheel_min_dt" value="0.005" />
+    <param name="wheel_max_dt" value="0.5" />
+    <param name="wheel_reset_max_delta_xy" value="3.0" />
+    <param name="wheel_reset_max_delta_yaw" value="0.78539816339" />
+    <param name="wheel_max_speed" value="10.0" />
+    <param name="wheel_max_yaw_rate" value="1.0" />
 
     <remap from="odometry/filtered" to="/localization/final_odom" />
   </node>

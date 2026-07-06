@@ -11,7 +11,26 @@ odom_frame: odom
 base_link_frame: base_link
 world_frame: map
 
+state_timeout_sec: 1.0
+
+imu_use_orientation: false
+imu_use_angular_velocity: true
+imu_use_linear_acceleration: false
+imu_extrinsic_roll: 0.0
+imu_extrinsic_pitch: 0.0
+imu_extrinsic_yaw: -1.57079632679
+
+wheel_min_dt: 0.005
+wheel_max_dt: 0.5
+wheel_reset_max_delta_xy: 3.0
+wheel_reset_max_delta_yaw: 0.78539816339
+wheel_max_speed: 10.0
+wheel_max_yaw_rate: 1.0
+
 # Do not configure odom0/odom1/imu0 here.
 # loc_ekf_multi_sensor_node subscribes to all inputs itself, adjusts covariance,
 # converts wheel odometry increments to twist, and feeds selected measurements
 # directly into RosEkf.
+#
+# The EKF is deliberately gated: wheel and IMU measurements are dropped until
+# the first valid INS/Fusion absolute pose has initialized x/y/yaw.

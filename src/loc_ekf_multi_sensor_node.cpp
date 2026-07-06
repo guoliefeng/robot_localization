@@ -49,11 +49,12 @@ enum class LocalizationPolicy : unsigned long long
   USE_RELOC_X = 64
 };
 
-enum class InputQuality
+enum class SourceMode
 {
-  GOOD,
+  PRIMARY,
+  WEAK,
   DEGRADED,
-  BAD
+  DROP
 };
 
 double deg2rad(const double deg)
@@ -85,6 +86,14 @@ std::vector<int> makeTwistUpdateVector()
   std::vector<int> update_vector = makeEmptyUpdateVector();
   update_vector[RobotLocalization::StateMemberVx] = 1;
   update_vector[RobotLocalization::StateMemberVy] = 1;
+  update_vector[RobotLocalization::StateMemberVyaw] = 1;
+  return update_vector;
+}
+
+std::vector<int> makeWheelTwistUpdateVector()
+{
+  std::vector<int> update_vector = makeEmptyUpdateVector();
+  update_vector[RobotLocalization::StateMemberVx] = 1;
   update_vector[RobotLocalization::StateMemberVyaw] = 1;
   return update_vector;
 }
@@ -234,16 +243,18 @@ const char *statusToString(const LocalizationStatus status)
   return "UNKNOWN";
 }
 
-const char *qualityToString(const InputQuality quality)
+const char *modeToString(const SourceMode mode)
 {
-  switch (quality)
+  switch (mode)
   {
-    case InputQuality::GOOD:
-      return "GOOD";
-    case InputQuality::DEGRADED:
+    case SourceMode::PRIMARY:
+      return "PRIMARY";
+    case SourceMode::WEAK:
+      return "WEAK";
+    case SourceMode::DEGRADED:
       return "DEGRADED";
-    case InputQuality::BAD:
-      return "BAD";
+    case SourceMode::DROP:
+      return "DROP";
   }
 
   return "UNKNOWN";
@@ -263,7 +274,7 @@ public:
       ins_twist_cb_data_(makeCallbackData("ins_twist", makeTwistUpdateVector(), 3.0)),
       fusion_pose_cb_data_(makeCallbackData("fusion_pose", makePoseUpdateVector(), 3.0)),
       fusion_twist_cb_data_(makeCallbackData("fusion_twist", makeTwistUpdateVector(), 3.0)),
-      wheel_twist_cb_data_(makeCallbackData("wheel_twist", makeTwistUpdateVector(), 3.0)),
+      wheel_twist_cb_data_(makeCallbackData("wheel_twist", makeWheelTwistUpdateVector(), 3.0)),
       imu_pose_cb_data_(makeCallbackData("imu_pose", makeEmptyUpdateVector(), 3.0)),
       imu_twist_cb_data_(makeCallbackData("imu_twist", makeImuTwistUpdateVector(true), 3.0)),
       imu_accel_cb_data_(makeCallbackData("imu_accel", makeEmptyUpdateVector(), 3.0))
@@ -317,15 +328,14 @@ private:
     nh_priv_.param("imu_use_linear_acceleration", imu_use_linear_acceleration_, false);
     nh_priv_.param("imu_extrinsic_roll", imu_extrinsic_roll_, 0.0);
     nh_priv_.param("imu_extrinsic_pitch", imu_extrinsic_pitch_, 0.0);
-    nh_priv_.param("imu_extrinsic_yaw", imu_extrinsic_yaw_, 0.0);
+    nh_priv_.param("imu_extrinsic_yaw", imu_extrinsic_yaw_, -1.57079632679);
 
     nh_priv_.param("wheel_max_dt", wheel_max_dt_, 0.5);
+    nh_priv_.param("wheel_min_dt", wheel_min_dt_, 0.005);
     nh_priv_.param("wheel_reset_max_delta_xy", wheel_reset_max_delta_xy_, 3.0);
     nh_priv_.param("wheel_reset_max_delta_yaw", wheel_reset_max_delta_yaw_, deg2rad(45.0));
-    nh_priv_.param("wheel_good_vxy_var", wheel_good_vxy_var_, 0.05);
-    nh_priv_.param("wheel_good_vyaw_var", wheel_good_vyaw_var_, std::pow(deg2rad(1.0), 2.0));
-    nh_priv_.param("wheel_degraded_vxy_var", wheel_degraded_vxy_var_, 0.50);
-    nh_priv_.param("wheel_degraded_vyaw_var", wheel_degraded_vyaw_var_, std::pow(deg2rad(5.0), 2.0));
+    nh_priv_.param("wheel_max_speed", wheel_max_speed_, 10.0);
+    nh_priv_.param("wheel_max_yaw_rate", wheel_max_yaw_rate_, 1.0);
   }
 
   void configureCallbackData()
@@ -345,7 +355,7 @@ private:
     fusion_twist_cb_data_ =
       makeCallbackData("fusion_twist", twist_update_vector, fusion_twist_rejection_threshold_);
     wheel_twist_cb_data_ =
-      makeCallbackData("wheel_twist", twist_update_vector, wheel_twist_rejection_threshold_);
+      makeCallbackData("wheel_twist", makeWheelTwistUpdateVector(), wheel_twist_rejection_threshold_);
     imu_pose_cb_data_ =
       makeCallbackData("imu_pose", imu_pose_update_vector, imu_pose_rejection_threshold_);
     imu_twist_cb_data_ =
@@ -384,127 +394,228 @@ private:
     return decision;
   }
 
-  InputQuality insQuality(const LocDecision &decision) const
+  bool hasValidLocDecision(const LocDecision &decision) const
   {
-    if (!hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
-    {
-      return InputQuality::BAD;
-    }
-
-    switch (decision.status)
-    {
-      case LocalizationStatus::NORMAL:
-        return InputQuality::GOOD;
-      case LocalizationStatus::NOT_STABLE:
-      case LocalizationStatus::SECONDARY:
-        return InputQuality::DEGRADED;
-      case LocalizationStatus::DR:
-      case LocalizationStatus::LOST:
-        return InputQuality::BAD;
-    }
-
-    return InputQuality::BAD;
+    return !decision.last_status_stamp.isZero() &&
+           !decision.last_policy_stamp.isZero() &&
+           decision.status != LocalizationStatus::LOST &&
+           decision.policy != static_cast<unsigned long long>(LocalizationPolicy::NO_LOCALIZATION);
   }
 
-  InputQuality fusionQuality(const LocDecision &decision) const
+  bool isAbsolutePoseInitialized() const
   {
-    if (!hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
-    {
-      return InputQuality::BAD;
-    }
-
-    switch (decision.status)
-    {
-      case LocalizationStatus::NORMAL:
-        return InputQuality::GOOD;
-      case LocalizationStatus::NOT_STABLE:
-        return InputQuality::DEGRADED;
-      case LocalizationStatus::SECONDARY:
-      case LocalizationStatus::DR:
-      case LocalizationStatus::LOST:
-        return InputQuality::BAD;
-    }
-
-    return InputQuality::BAD;
+    return absolute_pose_initialized_;
   }
 
-  InputQuality wheelImuQuality(const LocDecision &decision) const
+  void markAbsolutePoseInitialized(const ros::Time &stamp)
   {
-    if (decision.policy == static_cast<unsigned long long>(LocalizationPolicy::NO_LOCALIZATION) ||
-        decision.status == LocalizationStatus::LOST)
+    if (!absolute_pose_initialized_)
     {
-      return InputQuality::BAD;
+      absolute_pose_initialized_ = true;
+      first_absolute_pose_stamp_ = stamp;
+      ++absolute_init_count_;
+      ROS_WARN_STREAM(
+        "LocEkfMultiSensor initialized by first absolute pose at t=" << stamp.toSec());
     }
-
-    switch (decision.status)
-    {
-      case LocalizationStatus::NORMAL:
-      case LocalizationStatus::DR:
-        return InputQuality::GOOD;
-      case LocalizationStatus::NOT_STABLE:
-      case LocalizationStatus::SECONDARY:
-        return InputQuality::DEGRADED;
-      case LocalizationStatus::LOST:
-        return InputQuality::BAD;
-    }
-
-    return InputQuality::BAD;
   }
 
-  void applyInsCovariance(nav_msgs::Odometry &odom, const InputQuality quality) const
+  SourceMode selectInsMode(const LocDecision &decision) const
+  {
+    if (decision.status == LocalizationStatus::LOST)
+    {
+      return SourceMode::DROP;
+    }
+
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
+    {
+      if (decision.status == LocalizationStatus::NORMAL ||
+          decision.status == LocalizationStatus::SECONDARY)
+      {
+        return SourceMode::PRIMARY;
+      }
+
+      if (decision.status == LocalizationStatus::NOT_STABLE)
+      {
+        return SourceMode::DEGRADED;
+      }
+    }
+
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
+  }
+
+  SourceMode selectFusionMode(const LocDecision &decision) const
+  {
+    if (decision.status == LocalizationStatus::LOST ||
+        decision.status == LocalizationStatus::DR)
+    {
+      return SourceMode::DROP;
+    }
+
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
+    {
+      if (decision.status == LocalizationStatus::NORMAL)
+      {
+        return SourceMode::PRIMARY;
+      }
+
+      if (decision.status == LocalizationStatus::NOT_STABLE)
+      {
+        return SourceMode::DEGRADED;
+      }
+    }
+
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
+  }
+
+  SourceMode selectWheelMode(const LocDecision &decision) const
+  {
+    if (decision.status == LocalizationStatus::LOST)
+    {
+      return SourceMode::DROP;
+    }
+
+    if (decision.status == LocalizationStatus::DR &&
+        (hasPolicy(decision.policy, LocalizationPolicy::USE_ODOM_VEL_IMU) ||
+         hasPolicy(decision.policy, LocalizationPolicy::USE_ODOM_VEL)))
+    {
+      return SourceMode::PRIMARY;
+    }
+
+    if (decision.status == LocalizationStatus::NORMAL ||
+        decision.status == LocalizationStatus::NOT_STABLE ||
+        decision.status == LocalizationStatus::SECONDARY)
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
+  }
+
+  SourceMode selectImuMode(const LocDecision &decision) const
+  {
+    if (decision.status == LocalizationStatus::LOST)
+    {
+      return SourceMode::DROP;
+    }
+
+    if (decision.status == LocalizationStatus::DR &&
+        hasPolicy(decision.policy, LocalizationPolicy::USE_ODOM_VEL_IMU))
+    {
+      return SourceMode::PRIMARY;
+    }
+
+    if (decision.status == LocalizationStatus::DR)
+    {
+      return SourceMode::WEAK;
+    }
+
+    if (decision.status == LocalizationStatus::NORMAL ||
+        decision.status == LocalizationStatus::NOT_STABLE ||
+        decision.status == LocalizationStatus::SECONDARY)
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
+  }
+
+  void applyInsCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
 
-    switch (quality)
+    switch (mode)
     {
-      case InputQuality::GOOD:
+      case SourceMode::PRIMARY:
         setPoseCov(odom, 0.02, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         setTwistCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         break;
-      case InputQuality::DEGRADED:
+      case SourceMode::WEAK:
+        setPoseCov(odom, 10.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
+        setTwistCov(odom, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
+        break;
+      case SourceMode::DEGRADED:
         setPoseCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(3.0), 2.0));
         setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(2.0), 2.0));
         break;
-      case InputQuality::BAD:
-        setPoseCov(odom, 100.0, 100.0, 100.0, std::pow(deg2rad(20.0), 2.0));
-        setTwistCov(odom, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
+      case SourceMode::DROP:
         break;
     }
   }
 
-  void applyFusionCovariance(nav_msgs::Odometry &odom, const InputQuality quality) const
+  void applyFusionCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
 
-    switch (quality)
+    switch (mode)
     {
-      case InputQuality::GOOD:
+      case SourceMode::PRIMARY:
         setPoseCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
         setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
         break;
-      case InputQuality::DEGRADED:
+      case SourceMode::WEAK:
+        setPoseCov(odom, 20.0, 100.0, 100.0, std::pow(deg2rad(15.0), 2.0));
+        setTwistCov(odom, 2.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
+        break;
+      case SourceMode::DEGRADED:
         setPoseCov(odom, 5.0, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
         setTwistCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
         break;
-      case InputQuality::BAD:
+      case SourceMode::DROP:
         break;
     }
   }
 
   void applyWheelCovariance(
     geometry_msgs::TwistWithCovarianceStamped &twist,
-    const InputQuality quality) const
+    const SourceMode mode) const
   {
-    switch (quality)
+    switch (mode)
     {
-      case InputQuality::GOOD:
-        setWheelTwistCov(twist, wheel_good_vxy_var_, 100.0, 100.0, wheel_good_vyaw_var_);
+      case SourceMode::PRIMARY:
+        setWheelTwistCov(twist, 0.05, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
         break;
-      case InputQuality::DEGRADED:
-        setWheelTwistCov(twist, wheel_degraded_vxy_var_, 100.0, 100.0, wheel_degraded_vyaw_var_);
+      case SourceMode::WEAK:
+        setWheelTwistCov(twist, 1.0, 100.0, 100.0, std::pow(deg2rad(8.0), 2.0));
         break;
-      case InputQuality::BAD:
-        setWheelTwistCov(twist, 100.0, 100.0, 100.0, std::pow(deg2rad(20.0), 2.0));
+      case SourceMode::DEGRADED:
+        setWheelTwistCov(twist, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
+        break;
+      case SourceMode::DROP:
+        break;
+    }
+  }
+
+  void applyImuCovariance(sensor_msgs::Imu &imu, const SourceMode mode) const
+  {
+    std::fill(imu.orientation_covariance.begin(), imu.orientation_covariance.end(), 0.0);
+    std::fill(imu.angular_velocity_covariance.begin(), imu.angular_velocity_covariance.end(), 0.0);
+    std::fill(imu.linear_acceleration_covariance.begin(), imu.linear_acceleration_covariance.end(), 0.0);
+
+    imu.orientation_covariance[0] = -1.0;
+    imu.linear_acceleration_covariance[0] = -1.0;
+
+    switch (mode)
+    {
+      case SourceMode::PRIMARY:
+        imu.angular_velocity_covariance[8] = std::pow(deg2rad(1.0), 2.0);
+        break;
+      case SourceMode::WEAK:
+        imu.angular_velocity_covariance[8] = std::pow(deg2rad(8.0), 2.0);
+        break;
+      case SourceMode::DEGRADED:
+        imu.angular_velocity_covariance[8] = std::pow(deg2rad(3.0), 2.0);
+        break;
+      case SourceMode::DROP:
         break;
     }
   }
@@ -517,22 +628,34 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = insQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
+    const SourceMode wheel_mode = selectWheelMode(decision);
+    const SourceMode imu_mode = selectImuMode(decision);
     ++ins_count_;
 
-    if (quality == InputQuality::BAD)
+    if (!hasValidLocDecision(decision))
     {
       ++ins_drop_count_;
-      logStatus(decision, quality, fusionQuality(decision), wheelImuQuality(decision));
+      ROS_WARN_STREAM_THROTTLE(1.0, "Drop INS before valid localization status/policy.");
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
+      return;
+    }
+
+    if (ins_mode == SourceMode::DROP)
+    {
+      ++ins_drop_count_;
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
       return;
     }
 
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
-    applyInsCovariance(*out, quality);
+    applyInsCovariance(*out, ins_mode);
 
+    markAbsolutePoseInitialized(out->header.stamp);
     ekf_.odometryCallback(out, "ins_odom", ins_pose_cb_data_, ins_twist_cb_data_);
-    logStatus(decision, quality, fusionQuality(decision), wheelImuQuality(decision));
+    logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
   }
 
   void fusionCb(const nav_msgs::Odometry::ConstPtr &msg)
@@ -543,22 +666,34 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = fusionQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
+    const SourceMode wheel_mode = selectWheelMode(decision);
+    const SourceMode imu_mode = selectImuMode(decision);
     ++fusion_count_;
 
-    if (quality == InputQuality::BAD)
+    if (!hasValidLocDecision(decision))
     {
       ++fusion_drop_count_;
-      logStatus(decision, insQuality(decision), quality, wheelImuQuality(decision));
+      ROS_WARN_STREAM_THROTTLE(1.0, "Drop Fusion before valid localization status/policy.");
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
+      return;
+    }
+
+    if (fusion_mode == SourceMode::DROP)
+    {
+      ++fusion_drop_count_;
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
       return;
     }
 
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
-    applyFusionCovariance(*out, quality);
+    applyFusionCovariance(*out, fusion_mode);
 
+    markAbsolutePoseInitialized(out->header.stamp);
     ekf_.odometryCallback(out, "fusion_odom", fusion_pose_cb_data_, fusion_twist_cb_data_);
-    logStatus(decision, insQuality(decision), quality, wheelImuQuality(decision));
+    logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
   }
 
   void wheelCb(const nav_msgs::Odometry::ConstPtr &msg)
@@ -569,14 +704,29 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = wheelImuQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
+    const SourceMode wheel_mode = selectWheelMode(decision);
+    const SourceMode imu_mode = selectImuMode(decision);
     ++wheel_count_;
 
-    if (quality == InputQuality::BAD)
+    if (wheel_mode == SourceMode::DROP)
     {
       ++wheel_drop_count_;
       resetWheelReference(*msg);
-      logStatus(decision, insQuality(decision), fusionQuality(decision), quality);
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
+      return;
+    }
+
+    if (!isAbsolutePoseInitialized())
+    {
+      ++wheel_drop_count_;
+      ++preinit_wheel_drop_count_;
+      resetWheelReference(*msg);
+      ROS_WARN_STREAM_THROTTLE(
+        1.0,
+        "Drop wheel odom before first absolute pose initialization.");
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
       return;
     }
 
@@ -594,27 +744,45 @@ private:
     const double dyaw = normalizeAngle(curr_yaw - prev_yaw);
     const double delta_xy = std::hypot(dx, dy);
 
-    if (dt <= 0.0 || dt > wheel_max_dt_ ||
+    if (dt < wheel_min_dt_ || dt > wheel_max_dt_ ||
         delta_xy > wheel_reset_max_delta_xy_ ||
         std::fabs(dyaw) > wheel_reset_max_delta_yaw_)
     {
       ++wheel_reset_count_;
       resetWheelReference(*msg);
-      logStatus(decision, insQuality(decision), fusionQuality(decision), quality);
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
+      return;
+    }
+
+    const double vx = (std::cos(prev_yaw) * dx + std::sin(prev_yaw) * dy) / dt;
+    const double vy = (-std::sin(prev_yaw) * dx + std::cos(prev_yaw) * dy) / dt;
+    const double wz = dyaw / dt;
+
+    if (std::fabs(vx) > wheel_max_speed_ ||
+        std::fabs(vy) > wheel_max_speed_ ||
+        std::fabs(wz) > wheel_max_yaw_rate_)
+    {
+      ++wheel_reset_count_;
+      resetWheelReference(*msg);
+      ROS_WARN_STREAM_THROTTLE(
+        1.0,
+        "Drop wheel odom due to unreasonable twist: vx="
+          << vx << ", vy=" << vy << ", wz=" << wz);
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
       return;
     }
 
     geometry_msgs::TwistWithCovarianceStampedPtr twist(new geometry_msgs::TwistWithCovarianceStamped());
     twist->header.stamp = msg->header.stamp;
     twist->header.frame_id = child_frame_id_;
-    twist->twist.twist.linear.x = (std::cos(prev_yaw) * dx + std::sin(prev_yaw) * dy) / dt;
-    twist->twist.twist.linear.y = (-std::sin(prev_yaw) * dx + std::cos(prev_yaw) * dy) / dt;
-    twist->twist.twist.angular.z = dyaw / dt;
-    applyWheelCovariance(*twist, quality);
+    twist->twist.twist.linear.x = vx;
+    twist->twist.twist.linear.y = vy;
+    twist->twist.twist.angular.z = wz;
+    applyWheelCovariance(*twist, wheel_mode);
 
     ekf_.twistCallback(twist, wheel_twist_cb_data_, child_frame_id_);
     resetWheelReference(*msg);
-    logStatus(decision, insQuality(decision), fusionQuality(decision), quality);
+    logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
   }
 
   void imuCb(const sensor_msgs::Imu::ConstPtr &msg)
@@ -625,13 +793,27 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = wheelImuQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
+    const SourceMode wheel_mode = selectWheelMode(decision);
+    const SourceMode imu_mode = selectImuMode(decision);
     ++imu_count_;
 
-    if (quality == InputQuality::BAD)
+    if (imu_mode == SourceMode::DROP)
     {
       ++imu_drop_count_;
-      logStatus(decision, insQuality(decision), fusionQuality(decision), quality);
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
+      return;
+    }
+
+    if (!isAbsolutePoseInitialized())
+    {
+      ++imu_drop_count_;
+      ++preinit_imu_drop_count_;
+      ROS_WARN_STREAM_THROTTLE(
+        1.0,
+        "Drop IMU before first absolute pose initialization.");
+      logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
       return;
     }
 
@@ -645,9 +827,10 @@ private:
     tf2::Quaternion base_orientation = imu_orientation * imu_to_base_quat_.inverse();
     base_orientation.normalize();
     out->orientation = tf2::toMsg(base_orientation);
+    applyImuCovariance(*out, imu_mode);
 
     ekf_.imuCallback(out, "imu", imu_pose_cb_data_, imu_twist_cb_data_, imu_accel_cb_data_);
-    logStatus(decision, insQuality(decision), fusionQuality(decision), quality);
+    logStatus(decision, ins_mode, fusion_mode, wheel_mode, imu_mode);
   }
 
   void resetWheelReference(const nav_msgs::Odometry &msg)
@@ -673,17 +856,21 @@ private:
 
   void logStatus(
     const LocDecision &decision,
-    const InputQuality ins_quality,
-    const InputQuality fusion_quality,
-    const InputQuality wheel_imu_quality) const
+    const SourceMode ins_mode,
+    const SourceMode fusion_mode,
+    const SourceMode wheel_mode,
+    const SourceMode imu_mode) const
   {
     ROS_INFO_STREAM_THROTTLE(
       1.0,
       "LocEkfMultiSensor state: status=" << statusToString(decision.status)
                                          << " policy=" << decision.policy
-                                         << " ins=" << qualityToString(ins_quality)
-                                         << " fusion=" << qualityToString(fusion_quality)
-                                         << " wheel_imu=" << qualityToString(wheel_imu_quality)
+                                         << " ins=" << modeToString(ins_mode)
+                                         << " fusion=" << modeToString(fusion_mode)
+                                         << " wheel=" << modeToString(wheel_mode)
+                                         << " imu=" << modeToString(imu_mode)
+                                         << " abs_init=" << absolute_pose_initialized_
+                                         << " abs_init_count=" << absolute_init_count_
                                          << " ins_in=" << ins_count_
                                          << " ins_drop=" << ins_drop_count_
                                          << " fusion_in=" << fusion_count_
@@ -691,8 +878,10 @@ private:
                                          << " wheel_in=" << wheel_count_
                                          << " wheel_drop=" << wheel_drop_count_
                                          << " wheel_reset=" << wheel_reset_count_
+                                         << " preinit_wheel_drop=" << preinit_wheel_drop_count_
                                          << " imu_in=" << imu_count_
-                                         << " imu_drop=" << imu_drop_count_);
+                                         << " imu_drop=" << imu_drop_count_
+                                         << " preinit_imu_drop=" << preinit_imu_drop_count_);
   }
 
   ros::NodeHandle nh_;
@@ -733,17 +922,16 @@ private:
   bool imu_use_linear_acceleration_ = false;
   double imu_extrinsic_roll_ = 0.0;
   double imu_extrinsic_pitch_ = 0.0;
-  double imu_extrinsic_yaw_ = 0.0;
+  double imu_extrinsic_yaw_ = -1.57079632679;
   tf2::Quaternion imu_to_base_quat_;
   tf2::Matrix3x3 imu_to_base_rotation_;
 
   double wheel_max_dt_ = 0.5;
+  double wheel_min_dt_ = 0.005;
   double wheel_reset_max_delta_xy_ = 3.0;
   double wheel_reset_max_delta_yaw_ = deg2rad(45.0);
-  double wheel_good_vxy_var_ = 0.05;
-  double wheel_good_vyaw_var_ = std::pow(deg2rad(1.0), 2.0);
-  double wheel_degraded_vxy_var_ = 0.50;
-  double wheel_degraded_vyaw_var_ = std::pow(deg2rad(5.0), 2.0);
+  double wheel_max_speed_ = 10.0;
+  double wheel_max_yaw_rate_ = 1.0;
 
   RobotLocalization::CallbackData ins_pose_cb_data_;
   RobotLocalization::CallbackData ins_twist_cb_data_;
@@ -758,6 +946,9 @@ private:
   ros::Time last_wheel_stamp_;
   nav_msgs::Odometry last_wheel_odom_;
 
+  bool absolute_pose_initialized_ = false;
+  ros::Time first_absolute_pose_stamp_;
+
   uint64_t ins_count_ = 0;
   uint64_t ins_drop_count_ = 0;
   uint64_t fusion_count_ = 0;
@@ -767,6 +958,9 @@ private:
   uint64_t wheel_reset_count_ = 0;
   uint64_t imu_count_ = 0;
   uint64_t imu_drop_count_ = 0;
+  uint64_t preinit_wheel_drop_count_ = 0;
+  uint64_t preinit_imu_drop_count_ = 0;
+  uint64_t absolute_init_count_ = 0;
 };
 
 int main(int argc, char **argv)
