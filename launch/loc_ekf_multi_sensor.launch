@@ -1,0 +1,33 @@
+<launch>
+  <arg name="use_sim_time" default="false" />
+  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_multi_sensor.yaml" />
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <node pkg="robot_localization"
+        type="loc_ekf_multi_sensor_node"
+        name="loc_ekf_multi_sensor"
+        output="screen"
+        clear_params="true">
+    <rosparam command="load" file="$(arg ekf_config)" />
+
+    <param name="ins_odom_topic" value="/localization/ins" />
+    <param name="fusion_odom_topic" value="/lio_loc_result" />
+    <param name="wheel_odom_topic" value="/wheel_odom" />
+    <param name="imu_topic" value="/ins_driver/imu" />
+    <param name="localization_status_topic" value="/localization/status" />
+    <param name="loc_policy_topic" value="/localization/loc_policy_code" />
+
+    <param name="frame_id" value="map" />
+    <param name="child_frame_id" value="base_link" />
+
+    <param name="imu_extrinsic_roll" value="0.0" />
+    <param name="imu_extrinsic_pitch" value="0.0" />
+    <param name="imu_extrinsic_yaw" value="0.0" />
+    <param name="imu_use_orientation" value="false" />
+    <param name="imu_use_angular_velocity" value="true" />
+    <param name="imu_use_linear_acceleration" value="false" />
+
+    <remap from="odometry/filtered" to="/localization/final_odom" />
+  </node>
+</launch>

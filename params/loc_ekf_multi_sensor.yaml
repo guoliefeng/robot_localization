@@ -1,0 +1,17 @@
+frequency: 50
+sensor_timeout: 0.2
+two_d_mode: true
+publish_tf: false
+print_diagnostics: true
+debug: false
+debug_out_file: /tmp/loc_ekf_multi_sensor_debug.txt
+
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+
+# Do not configure odom0/odom1/imu0 here.
+# loc_ekf_multi_sensor_node subscribes to all inputs itself, adjusts covariance,
+# converts wheel odometry increments to twist, and feeds selected measurements
+# directly into RosEkf.
