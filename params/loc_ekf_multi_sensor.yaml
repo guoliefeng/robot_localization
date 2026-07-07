@@ -1,4 +1,4 @@
-frequency: 50
+frequency: 100
 sensor_timeout: 0.2
 two_d_mode: true
 publish_tf: false
@@ -19,6 +19,9 @@ imu_use_linear_acceleration: false
 imu_extrinsic_roll: 0.0
 imu_extrinsic_pitch: 0.0
 imu_extrinsic_yaw: -1.57079632679
+imu_primary_yaw_rate_std_deg: 1.0
+imu_weak_yaw_rate_std_deg: 180.0
+imu_degraded_yaw_rate_std_deg: 30.0
 
 wheel_min_dt: 0.005
 wheel_max_dt: 0.5

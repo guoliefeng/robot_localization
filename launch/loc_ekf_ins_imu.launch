@@ -1,6 +1,10 @@
 <launch>
   <arg name="use_sim_time" default="false" />
-  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_multi_sensor.yaml" />
+  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_ins_imu.yaml" />
+  <arg name="ins_odom_topic" default="/localization/ins" />
+  <arg name="imu_topic" default="/ins_driver/imu" />
+  <arg name="localization_status_topic" default="/localization/status" />
+  <arg name="loc_policy_topic" default="/localization/loc_policy_code" />
   <arg name="imu_extrinsic_yaw" default="-1.57079632679" />
   <arg name="imu_use_orientation" default="false" />
   <arg name="imu_use_angular_velocity" default="true" />
@@ -12,18 +16,16 @@
   <param name="/use_sim_time" value="$(arg use_sim_time)" />
 
   <node pkg="robot_localization"
-        type="loc_ekf_multi_sensor_node"
-        name="loc_ekf_multi_sensor"
+        type="loc_ekf_ins_imu_node"
+        name="loc_ekf_ins_imu"
         output="screen"
         clear_params="true">
     <rosparam command="load" file="$(arg ekf_config)" />
 
-    <param name="ins_odom_topic" value="/localization/ins" />
-    <param name="fusion_odom_topic" value="/lio_loc_result" />
-    <param name="wheel_odom_topic" value="/wheel_odom" />
-    <param name="imu_topic" value="/ins_driver/imu" />
-    <param name="localization_status_topic" value="/localization/status" />
-    <param name="loc_policy_topic" value="/localization/loc_policy_code" />
+    <param name="ins_odom_topic" value="$(arg ins_odom_topic)" />
+    <param name="imu_topic" value="$(arg imu_topic)" />
+    <param name="localization_status_topic" value="$(arg localization_status_topic)" />
+    <param name="loc_policy_topic" value="$(arg loc_policy_topic)" />
 
     <param name="frame_id" value="map" />
     <param name="child_frame_id" value="base_link" />
@@ -37,13 +39,6 @@
     <param name="imu_primary_yaw_rate_std_deg" value="$(arg imu_primary_yaw_rate_std_deg)" />
     <param name="imu_weak_yaw_rate_std_deg" value="$(arg imu_weak_yaw_rate_std_deg)" />
     <param name="imu_degraded_yaw_rate_std_deg" value="$(arg imu_degraded_yaw_rate_std_deg)" />
-
-    <param name="wheel_min_dt" value="0.005" />
-    <param name="wheel_max_dt" value="0.5" />
-    <param name="wheel_reset_max_delta_xy" value="3.0" />
-    <param name="wheel_reset_max_delta_yaw" value="0.78539816339" />
-    <param name="wheel_max_speed" value="10.0" />
-    <param name="wheel_max_yaw_rate" value="1.0" />
 
     <remap from="odometry/filtered" to="/localization/final_odom" />
   </node>

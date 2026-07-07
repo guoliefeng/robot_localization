@@ -1,0 +1,32 @@
+frequency: 100
+sensor_timeout: 0.2
+two_d_mode: true
+publish_tf: false
+print_diagnostics: true
+debug: false
+debug_out_file: /tmp/loc_ekf_ins_imu_debug.txt
+
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+
+state_timeout_sec: 1.0
+
+imu_use_orientation: false
+imu_use_angular_velocity: true
+imu_use_linear_acceleration: false
+imu_extrinsic_roll: 0.0
+imu_extrinsic_pitch: 0.0
+imu_extrinsic_yaw: -1.57079632679
+imu_primary_yaw_rate_std_deg: 1.0
+imu_weak_yaw_rate_std_deg: 180.0
+imu_degraded_yaw_rate_std_deg: 30.0
+
+# Do not configure odom0/imu0 here.
+# loc_ekf_ins_imu_node subscribes to INS, IMU, and Loc status/policy itself,
+# adjusts covariance, applies IMU extrinsic rotation, and feeds selected
+# measurements directly into RosEkf.
+#
+# The EKF is deliberately gated: IMU measurements are dropped until the first
+# valid INS absolute pose has initialized x/y/yaw.

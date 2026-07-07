@@ -156,6 +156,7 @@ add_executable(navsat_transform_node src/navsat_transform_node.cpp)
 add_executable(robot_localization_listener_node src/robot_localization_listener_node.cpp)
 add_executable(yangpu_loc_ekf_node src/loc_ekf_node.cpp)
 add_executable(loc_ekf_multi_sensor_node src/loc_ekf_multi_sensor_node.cpp)
+add_executable(loc_ekf_ins_imu_node src/loc_ekf_ins_imu_node.cpp)
 
 # Dependencies
 add_dependencies(filter_base ${PROJECT_NAME}_gencpp)
@@ -163,6 +164,7 @@ add_dependencies(navsat_transform ${PROJECT_NAME}_gencpp)
 add_dependencies(robot_localization_listener_node ${PROJECT_NAME}_gencpp)
 add_dependencies(yangpu_loc_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(loc_ekf_multi_sensor_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
+add_dependencies(loc_ekf_ins_imu_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 
 # Linking
 target_link_libraries(ros_filter_utilities ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
@@ -177,6 +179,7 @@ target_link_libraries(ros_robot_localization_listener robot_localization_estimat
 target_link_libraries(robot_localization_listener_node ros_robot_localization_listener ${catkin_LIBRARIES})
 target_link_libraries(yangpu_loc_ekf_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(loc_ekf_multi_sensor_node ros_filter ${catkin_LIBRARIES})
+target_link_libraries(loc_ekf_ins_imu_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(ekf_localization_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(ekf_localization_nodelet ros_filter ${catkin_LIBRARIES})
 target_link_libraries(ukf_localization_node ros_filter ${catkin_LIBRARIES})
@@ -213,6 +216,7 @@ install(TARGETS
   robot_localization_listener_node
   yangpu_loc_ekf_node
   loc_ekf_multi_sensor_node
+  loc_ekf_ins_imu_node
   ukf_localization_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
