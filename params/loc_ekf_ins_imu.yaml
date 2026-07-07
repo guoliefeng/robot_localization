@@ -19,9 +19,14 @@ imu_use_linear_acceleration: false
 imu_extrinsic_roll: 0.0
 imu_extrinsic_pitch: 0.0
 imu_extrinsic_yaw: -1.57079632679
+# Raw IMU acceleration is reported in g. Convert to m/s^2 before fusion.
+imu_linear_acceleration_scale: 9.806
 imu_primary_yaw_rate_std_deg: 1.0
 imu_weak_yaw_rate_std_deg: 180.0
 imu_degraded_yaw_rate_std_deg: 30.0
+imu_primary_linear_acceleration_std: 20.0
+imu_weak_linear_acceleration_std: 20.0
+imu_degraded_linear_acceleration_std: 20.0
 
 # Do not configure odom0/imu0 here.
 # loc_ekf_ins_imu_node subscribes to INS, IMU, and Loc status/policy itself,

@@ -1,8 +1,9 @@
 <launch>
   <arg name="use_sim_time" default="false" />
   <arg name="set_use_sim_time" default="false" />
-  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_ins_imu.yaml" />
+  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_ins_imu_wheel.yaml" />
   <arg name="ins_odom_topic" default="/localization/ins" />
+  <arg name="wheel_odom_topic" default="/wheel_odom" />
   <arg name="imu_topic" default="/ins_driver/imu" />
   <arg name="localization_status_topic" default="/localization/status" />
   <arg name="loc_policy_topic" default="/localization/loc_policy_code" />
@@ -19,17 +20,22 @@
   <arg name="imu_primary_linear_acceleration_std" default="20.0" />
   <arg name="imu_weak_linear_acceleration_std" default="20.0" />
   <arg name="imu_degraded_linear_acceleration_std" default="20.0" />
+  <arg name="test_drop_ins_enabled" default="false" />
+  <arg name="test_drop_ins_start_sec" default="20.0" />
+  <arg name="test_drop_ins_period_sec" default="30.0" />
+  <arg name="test_drop_ins_duration_sec" default="5.0" />
 
   <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
   <node pkg="robot_localization"
-        type="loc_ekf_ins_imu_node"
-        name="loc_ekf_ins_imu"
+        type="loc_ekf_ins_imu_wheel_node"
+        name="loc_ekf_ins_imu_wheel"
         output="screen"
         clear_params="true">
     <rosparam command="load" file="$(arg ekf_config)" />
 
     <param name="ins_odom_topic" value="$(arg ins_odom_topic)" />
+    <param name="wheel_odom_topic" value="$(arg wheel_odom_topic)" />
     <param name="imu_topic" value="$(arg imu_topic)" />
     <param name="localization_status_topic" value="$(arg localization_status_topic)" />
     <param name="loc_policy_topic" value="$(arg loc_policy_topic)" />
@@ -50,6 +56,11 @@
     <param name="imu_primary_linear_acceleration_std" value="$(arg imu_primary_linear_acceleration_std)" />
     <param name="imu_weak_linear_acceleration_std" value="$(arg imu_weak_linear_acceleration_std)" />
     <param name="imu_degraded_linear_acceleration_std" value="$(arg imu_degraded_linear_acceleration_std)" />
+
+    <param name="test_drop_ins_enabled" value="$(arg test_drop_ins_enabled)" />
+    <param name="test_drop_ins_start_sec" value="$(arg test_drop_ins_start_sec)" />
+    <param name="test_drop_ins_period_sec" value="$(arg test_drop_ins_period_sec)" />
+    <param name="test_drop_ins_duration_sec" value="$(arg test_drop_ins_duration_sec)" />
 
     <remap from="odometry/filtered" to="/localization/final_odom" />
   </node>

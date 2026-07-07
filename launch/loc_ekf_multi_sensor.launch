@@ -1,15 +1,22 @@
 <launch>
   <arg name="use_sim_time" default="false" />
+  <arg name="set_use_sim_time" default="false" />
   <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_multi_sensor.yaml" />
+  <arg name="imu_extrinsic_roll" default="0.0" />
+  <arg name="imu_extrinsic_pitch" default="0.0" />
   <arg name="imu_extrinsic_yaw" default="-1.57079632679" />
+  <arg name="imu_linear_acceleration_scale" default="9.806" />
   <arg name="imu_use_orientation" default="false" />
   <arg name="imu_use_angular_velocity" default="true" />
   <arg name="imu_use_linear_acceleration" default="false" />
   <arg name="imu_primary_yaw_rate_std_deg" default="1.0" />
   <arg name="imu_weak_yaw_rate_std_deg" default="180.0" />
   <arg name="imu_degraded_yaw_rate_std_deg" default="30.0" />
+  <arg name="imu_primary_linear_acceleration_std" default="20.0" />
+  <arg name="imu_weak_linear_acceleration_std" default="20.0" />
+  <arg name="imu_degraded_linear_acceleration_std" default="20.0" />
 
-  <param name="/use_sim_time" value="$(arg use_sim_time)" />
+  <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
   <node pkg="robot_localization"
         type="loc_ekf_multi_sensor_node"
@@ -28,15 +35,19 @@
     <param name="frame_id" value="map" />
     <param name="child_frame_id" value="base_link" />
 
-    <param name="imu_extrinsic_roll" value="0.0" />
-    <param name="imu_extrinsic_pitch" value="0.0" />
+    <param name="imu_extrinsic_roll" value="$(arg imu_extrinsic_roll)" />
+    <param name="imu_extrinsic_pitch" value="$(arg imu_extrinsic_pitch)" />
     <param name="imu_extrinsic_yaw" value="$(arg imu_extrinsic_yaw)" />
+    <param name="imu_linear_acceleration_scale" value="$(arg imu_linear_acceleration_scale)" />
     <param name="imu_use_orientation" value="$(arg imu_use_orientation)" />
     <param name="imu_use_angular_velocity" value="$(arg imu_use_angular_velocity)" />
     <param name="imu_use_linear_acceleration" value="$(arg imu_use_linear_acceleration)" />
     <param name="imu_primary_yaw_rate_std_deg" value="$(arg imu_primary_yaw_rate_std_deg)" />
     <param name="imu_weak_yaw_rate_std_deg" value="$(arg imu_weak_yaw_rate_std_deg)" />
     <param name="imu_degraded_yaw_rate_std_deg" value="$(arg imu_degraded_yaw_rate_std_deg)" />
+    <param name="imu_primary_linear_acceleration_std" value="$(arg imu_primary_linear_acceleration_std)" />
+    <param name="imu_weak_linear_acceleration_std" value="$(arg imu_weak_linear_acceleration_std)" />
+    <param name="imu_degraded_linear_acceleration_std" value="$(arg imu_degraded_linear_acceleration_std)" />
 
     <param name="wheel_min_dt" value="0.005" />
     <param name="wheel_max_dt" value="0.5" />

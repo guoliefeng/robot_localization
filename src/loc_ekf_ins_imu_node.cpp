@@ -183,6 +183,13 @@ geometry_msgs::Vector3 rotateVector(
   return result;
 }
 
+void scaleVector(geometry_msgs::Vector3 &vector, const double scale)
+{
+  vector.x *= scale;
+  vector.y *= scale;
+  vector.z *= scale;
+}
+
 const char *statusToString(const LocalizationStatus status)
 {
   switch (status)
@@ -278,9 +285,13 @@ private:
     nh_priv_.param("imu_extrinsic_roll", imu_extrinsic_roll_, 0.0);
     nh_priv_.param("imu_extrinsic_pitch", imu_extrinsic_pitch_, 0.0);
     nh_priv_.param("imu_extrinsic_yaw", imu_extrinsic_yaw_, -1.57079632679);
+    nh_priv_.param("imu_linear_acceleration_scale", imu_linear_acceleration_scale_, 9.806);
     nh_priv_.param("imu_primary_yaw_rate_std_deg", imu_primary_yaw_rate_std_deg_, 1.0);
     nh_priv_.param("imu_weak_yaw_rate_std_deg", imu_weak_yaw_rate_std_deg_, 180.0);
     nh_priv_.param("imu_degraded_yaw_rate_std_deg", imu_degraded_yaw_rate_std_deg_, 30.0);
+    nh_priv_.param("imu_primary_linear_acceleration_std", imu_primary_linear_acceleration_std_, 20.0);
+    nh_priv_.param("imu_weak_linear_acceleration_std", imu_weak_linear_acceleration_std_, 20.0);
+    nh_priv_.param("imu_degraded_linear_acceleration_std", imu_degraded_linear_acceleration_std_, 20.0);
 
   }
 
@@ -445,21 +456,43 @@ private:
     std::fill(imu.linear_acceleration_covariance.begin(), imu.linear_acceleration_covariance.end(), 0.0);
 
     imu.orientation_covariance[0] = -1.0;
-    imu.linear_acceleration_covariance[0] = -1.0;
 
     switch (mode)
     {
       case SourceMode::PRIMARY:
         imu.angular_velocity_covariance[8] = std::pow(deg2rad(imu_primary_yaw_rate_std_deg_), 2.0);
+        if (imu_use_linear_acceleration_)
+        {
+          imu.linear_acceleration_covariance[0] = std::pow(imu_primary_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[4] = std::pow(imu_primary_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[8] = 10000.0;
+        }
         break;
       case SourceMode::WEAK:
         imu.angular_velocity_covariance[8] = std::pow(deg2rad(imu_weak_yaw_rate_std_deg_), 2.0);
+        if (imu_use_linear_acceleration_)
+        {
+          imu.linear_acceleration_covariance[0] = std::pow(imu_weak_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[4] = std::pow(imu_weak_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[8] = 10000.0;
+        }
         break;
       case SourceMode::DEGRADED:
         imu.angular_velocity_covariance[8] = std::pow(deg2rad(imu_degraded_yaw_rate_std_deg_), 2.0);
+        if (imu_use_linear_acceleration_)
+        {
+          imu.linear_acceleration_covariance[0] = std::pow(imu_degraded_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[4] = std::pow(imu_degraded_linear_acceleration_std_, 2.0);
+          imu.linear_acceleration_covariance[8] = 10000.0;
+        }
         break;
       case SourceMode::DROP:
         break;
+    }
+
+    if (!imu_use_linear_acceleration_)
+    {
+      imu.linear_acceleration_covariance[0] = -1.0;
     }
   }
 
@@ -533,6 +566,7 @@ private:
     out->header.frame_id = child_frame_id_;
     out->angular_velocity = rotateVector(msg->angular_velocity, imu_to_base_rotation_);
     out->linear_acceleration = rotateVector(msg->linear_acceleration, imu_to_base_rotation_);
+    scaleVector(out->linear_acceleration, imu_linear_acceleration_scale_);
 
     tf2::Quaternion imu_orientation;
     tf2::fromMsg(msg->orientation, imu_orientation);
@@ -611,9 +645,13 @@ private:
   double imu_extrinsic_roll_ = 0.0;
   double imu_extrinsic_pitch_ = 0.0;
   double imu_extrinsic_yaw_ = -1.57079632679;
+  double imu_linear_acceleration_scale_ = 9.806;
   double imu_primary_yaw_rate_std_deg_ = 1.0;
   double imu_weak_yaw_rate_std_deg_ = 180.0;
   double imu_degraded_yaw_rate_std_deg_ = 30.0;
+  double imu_primary_linear_acceleration_std_ = 20.0;
+  double imu_weak_linear_acceleration_std_ = 20.0;
+  double imu_degraded_linear_acceleration_std_ = 20.0;
   tf2::Quaternion imu_to_base_quat_;
   tf2::Matrix3x3 imu_to_base_rotation_;
 
