@@ -1,0 +1,27 @@
+<launch>
+  <arg name="use_sim_time" default="false" />
+  <arg name="set_use_sim_time" default="false" />
+  <arg name="ekf_config" default="$(find robot_localization)/params/ins_lio_differential_ekf.yaml" />
+
+  <!-- 如果 use_control=true，需要有控制输入。
+       默认使用 /cmd_vel。
+       如果车上控制话题不是 /cmd_vel，启动时传入 cmd_vel_topic:=实际话题。 -->
+  <arg name="cmd_vel_topic" default="/cmd_vel" />
+
+  <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <node pkg="robot_localization"
+        type="ekf_localization_node"
+        name="ins_lio_differential_ekf"
+        output="screen"
+        clear_params="true">
+
+    <rosparam command="load" file="$(arg ekf_config)" />
+
+    <!-- robot_localization 默认订阅相对名称 cmd_vel。
+         这里 remap 到实际控制话题。 -->
+    <remap from="cmd_vel" to="$(arg cmd_vel_topic)" />
+
+    <remap from="odometry/filtered" to="/localization/final_odom" />
+  </node>
+</launch>

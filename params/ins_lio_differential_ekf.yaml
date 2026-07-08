@@ -1,0 +1,141 @@
+frequency: 100
+sensor_timeout: 0.2
+two_d_mode: true
+publish_tf: false
+print_diagnostics: true
+debug: false
+debug_out_file: /tmp/ins_lio_differential_ekf_debug.txt
+
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+
+# ============================================================
+# ODOM0: INS absolute odometry
+# ============================================================
+# 主定位源：/localization/ins
+# 使用 INS absolute x/y/yaw，同时使用 vx/vy/vyaw。
+# 注意：bag 中 INS covariance 为 0，官方 EKF 会把它当成极强约束。
+# 这里依靠较大的 initial_estimate_covariance，允许 EKF 在初期接受真实 INS absolute pose。
+odom0: /localization/ins
+
+# 状态顺序：
+# x, y, z,
+# roll, pitch, yaw,
+# vx, vy, vz,
+# vroll, vpitch, vyaw,
+# ax, ay, az
+odom0_config: [true,  true,  false,
+               false, false, true,
+               true,  true,  false,
+               false, false, true,
+               false, false, false]
+
+odom0_differential: false
+odom0_relative: false
+odom0_queue_size: 20
+odom0_nodelay: false
+# initial_estimate_covariance: [1000000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 1000000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 1000000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 10.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 10.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 10.0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 100.0, 0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 100.0, 0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 100.0, 0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 10.0, 0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10.0, 0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10.0, 0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100.0, 0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100.0, 0,
+#                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100.0]
+
+# INS 是主源，但仍保留 Mahalanobis gate 防止明显异常值。
+odom0_pose_rejection_threshold: 5.0
+odom0_twist_rejection_threshold: 3.0
+
+# ============================================================
+# ODOM1: LIO differential odometry
+# ============================================================
+# 辅助源：/lio_loc_result
+# 只使用 LIO 的 pose x/y/yaw，并启用 differential。
+# robot_localization 会将相邻 LIO pose 差分转换成速度约束。
+odom1: /lio_loc_result
+
+# 注意：
+# 这里只打开 x / y / yaw。
+# 不打开 vx / vy / vyaw，避免同时融合 LIO raw twist 和 differential twist。
+odom1_config: [true,  true,  false,
+               false, false, true,
+               false, false, false,
+               false, false, false,
+               false, false, false]
+
+odom1_differential: true
+odom1_relative: false
+odom1_queue_size: 20
+odom1_nodelay: false
+
+# LIO differential 是辅助约束，阈值不要太小。
+odom1_pose_rejection_threshold: 5.0
+odom1_twist_rejection_threshold: 3.0
+
+# ============================================================
+# Control / acceleration prior
+# ============================================================
+# 如果有可靠的控制速度输入 cmd_vel，开启 use_control=true。
+# robot_localization 会在 prediction 阶段根据控制输入生成 acceleration term。
+#
+# 如果当前没有可靠 cmd_vel，请先把 use_control 改成 false。
+use_control: false
+stamped_control: false
+control_timeout: 0.2
+
+# 控制量顺序：
+# vx, vy, vz, vroll, vpitch, vyaw
+# 港口车辆主要控制前向速度 vx 和航向角速度 vyaw。
+control_config: [true, false, false, false, false, true]
+
+# 车辆前向最大加速度 2.0 m/s^2。
+# vyaw 先给保守值 1.0 rad/s^2，后续根据实车转向能力标定。
+acceleration_limits: [2.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+# 车辆前向最大减速度 5.0 m/s^2。
+# vyaw 先给保守值 2.0 rad/s^2，后续根据实车转向能力标定。
+deceleration_limits: [5.0, 0.0, 0.0, 0.0, 0.0, 2.0]
+
+# gain=1.0 表示允许控制预测快速达到限制。
+# 如果 prediction 过激，可把 vx 的 gain 调到 0.6~0.8。
+acceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+# ============================================================
+# Process noise
+# ============================================================
+# 状态顺序：
+# x, y, z,
+# roll, pitch, yaw,
+# vx, vy, vz,
+# vroll, vpitch, vyaw,
+# ax, ay, az
+#
+# 初版先使用官方模板量级。
+# 后续如果 final_odom 响应慢，增大 vx/vyaw 的 process noise；
+# 如果 final_odom 太抖，减小 vx/vyaw 的 process noise。
+process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0.025, 0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0.02, 0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0.01, 0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0.01, 0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0.015]

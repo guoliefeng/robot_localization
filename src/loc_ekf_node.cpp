@@ -43,11 +43,12 @@ enum class LocalizationPolicy : unsigned long long
   USE_RELOC_X = 64
 };
 
-enum class InputQuality
+enum class SourceMode
 {
-  GOOD,
+  PRIMARY,
+  WEAK,
   DEGRADED,
-  BAD
+  DROP
 };
 
 double deg2rad(const double deg)
@@ -152,16 +153,18 @@ const char *statusToString(const LocalizationStatus status)
   return "UNKNOWN";
 }
 
-const char *qualityToString(const InputQuality quality)
+const char *modeToString(const SourceMode mode)
 {
-  switch (quality)
+  switch (mode)
   {
-    case InputQuality::GOOD:
-      return "GOOD";
-    case InputQuality::DEGRADED:
+    case SourceMode::PRIMARY:
+      return "PRIMARY";
+    case SourceMode::WEAK:
+      return "WEAK";
+    case SourceMode::DEGRADED:
       return "DEGRADED";
-    case InputQuality::BAD:
-      return "BAD";
+    case SourceMode::DROP:
+      return "DROP";
   }
 
   return "UNKNOWN";
@@ -259,86 +262,113 @@ private:
     return decision;
   }
 
-  InputQuality insQuality(const LocDecision &decision) const
+  SourceMode selectInsMode(const LocDecision &decision) const
   {
-    if (!hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
+    if (decision.status == LocalizationStatus::LOST ||
+        decision.status == LocalizationStatus::DR)
     {
-      return InputQuality::BAD;
+      return SourceMode::DROP;
     }
 
-    switch (decision.status)
+    if (decision.status == LocalizationStatus::NORMAL &&
+        hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
     {
-      case LocalizationStatus::NORMAL:
-        return InputQuality::GOOD;
-      case LocalizationStatus::NOT_STABLE:
-      case LocalizationStatus::SECONDARY:
-        return InputQuality::DEGRADED;
-      case LocalizationStatus::DR:
-      case LocalizationStatus::LOST:
-        return InputQuality::BAD;
+      return SourceMode::DROP;
     }
 
-    return InputQuality::BAD;
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
+    {
+      if (decision.status == LocalizationStatus::NORMAL ||
+          decision.status == LocalizationStatus::SECONDARY)
+      {
+        return SourceMode::PRIMARY;
+      }
+
+      if (decision.status == LocalizationStatus::NOT_STABLE)
+      {
+        return SourceMode::DEGRADED;
+      }
+    }
+
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
   }
 
-  InputQuality fusionQuality(const LocDecision &decision) const
+  SourceMode selectFusionMode(const LocDecision &decision) const
   {
-    if (!hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
+    if (decision.status == LocalizationStatus::LOST ||
+        decision.status == LocalizationStatus::DR)
     {
-      return InputQuality::BAD;
+      return SourceMode::DROP;
     }
 
-    switch (decision.status)
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_FUSION_ODOM))
     {
-      case LocalizationStatus::NORMAL:
-        return InputQuality::GOOD;
-      case LocalizationStatus::NOT_STABLE:
-        return InputQuality::DEGRADED;
-      case LocalizationStatus::SECONDARY:
-      case LocalizationStatus::DR:
-      case LocalizationStatus::LOST:
-        return InputQuality::BAD;
+      if (decision.status == LocalizationStatus::NORMAL)
+      {
+        return SourceMode::PRIMARY;
+      }
+
+      if (decision.status == LocalizationStatus::NOT_STABLE)
+      {
+        return SourceMode::DEGRADED;
+      }
     }
 
-    return InputQuality::BAD;
+    if (hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
+    {
+      return SourceMode::WEAK;
+    }
+
+    return SourceMode::DROP;
   }
 
-  void applyInsCovariance(nav_msgs::Odometry &odom, const InputQuality quality) const
+  void applyInsCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
 
-    switch (quality)
+    switch (mode)
     {
-      case InputQuality::GOOD:
+      case SourceMode::PRIMARY:
         setPoseCov(odom, 0.02, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         setTwistCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         break;
-      case InputQuality::DEGRADED:
+      case SourceMode::WEAK:
+        setPoseCov(odom, 10.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
+        setTwistCov(odom, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
+        break;
+      case SourceMode::DEGRADED:
         setPoseCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(3.0), 2.0));
         setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(2.0), 2.0));
         break;
-      case InputQuality::BAD:
-        setPoseCov(odom, 100.0, 100.0, 100.0, std::pow(deg2rad(20.0), 2.0));
-        setTwistCov(odom, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
+      case SourceMode::DROP:
         break;
     }
   }
 
-  void applyFusionCovariance(nav_msgs::Odometry &odom, const InputQuality quality) const
+  void applyFusionCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
 
-    switch (quality)
+    switch (mode)
     {
-      case InputQuality::GOOD:
+      case SourceMode::PRIMARY:
         setPoseCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
         setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
         break;
-      case InputQuality::DEGRADED:
+      case SourceMode::WEAK:
+        setPoseCov(odom, 10.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
+        setTwistCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(8.0), 2.0));
+        break;
+      case SourceMode::DEGRADED:
         setPoseCov(odom, 5.0, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
         setTwistCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
         break;
-      case InputQuality::BAD:
+      case SourceMode::DROP:
         break;
     }
   }
@@ -351,22 +381,23 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = insQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
     ++ins_count_;
 
-    if (quality == InputQuality::BAD)
+    if (ins_mode == SourceMode::DROP)
     {
       ++ins_drop_count_;
-      logStatus(decision, quality, fusionQuality(decision));
+      logStatus(decision, ins_mode, fusion_mode);
       return;
     }
 
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
-    applyInsCovariance(*out, quality);
+    applyInsCovariance(*out, ins_mode);
 
     ekf_.odometryCallback(out, "ins_odom", ins_pose_cb_data_, ins_twist_cb_data_);
-    logStatus(decision, quality, fusionQuality(decision));
+    logStatus(decision, ins_mode, fusion_mode);
   }
 
   void fusionCb(const nav_msgs::Odometry::ConstPtr &msg)
@@ -377,22 +408,23 @@ private:
       decision = currentDecision();
     }
 
-    const InputQuality quality = fusionQuality(decision);
+    const SourceMode ins_mode = selectInsMode(decision);
+    const SourceMode fusion_mode = selectFusionMode(decision);
     ++fusion_count_;
 
-    if (quality == InputQuality::BAD)
+    if (fusion_mode == SourceMode::DROP)
     {
       ++fusion_drop_count_;
-      logStatus(decision, insQuality(decision), quality);
+      logStatus(decision, ins_mode, fusion_mode);
       return;
     }
 
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
-    applyFusionCovariance(*out, quality);
+    applyFusionCovariance(*out, fusion_mode);
 
     ekf_.odometryCallback(out, "fusion_odom", fusion_pose_cb_data_, fusion_twist_cb_data_);
-    logStatus(decision, insQuality(decision), quality);
+    logStatus(decision, ins_mode, fusion_mode);
   }
 
   void localizationStatusCb(const std_msgs::UInt8::ConstPtr &msg)
@@ -411,15 +443,15 @@ private:
 
   void logStatus(
     const LocDecision &decision,
-    const InputQuality ins_quality,
-    const InputQuality fusion_quality) const
+    const SourceMode ins_mode,
+    const SourceMode fusion_mode) const
   {
     ROS_INFO_STREAM_THROTTLE(
       1.0,
       "YangpuLocEkf loc_state: status=" << statusToString(decision.status)
                                         << " policy=" << decision.policy
-                                        << " ins=" << qualityToString(ins_quality)
-                                        << " fusion=" << qualityToString(fusion_quality)
+                                        << " ins=" << modeToString(ins_mode)
+                                        << " fusion=" << modeToString(fusion_mode)
                                         << " ins_in=" << ins_count_
                                         << " ins_drop=" << ins_drop_count_
                                         << " fusion_in=" << fusion_count_

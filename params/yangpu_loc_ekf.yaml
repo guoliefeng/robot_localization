@@ -11,8 +11,91 @@ odom_frame: odom
 base_link_frame: base_link
 world_frame: map
 
-# Do not configure odom0/odom1 here.
-# yangpu_loc_ekf_node subscribes to /localization/ins, /lio_loc_result,
-# /localization/status, and /localization/loc_policy_code itself. It consumes
-# Loc's final status/policy codes, adjusts covariance, and feeds selected
-# odometry directly into RosEkf.
+# 当前 yangpu_loc_ekf_node 是自定义节点：
+# 1. 自己订阅 /localization/ins 和 /lio_loc_result；
+# 2. 自己根据 /localization/status 和 /localization/loc_policy_code 修改 covariance；
+# 3. 自己调用 RosEkf::odometryCallback()；
+# 因此这里不要配置 odom0 / odom1 / imu0。
+# 如果配置 odom0/odom1，RosFilter::initialize() 可能会额外订阅原始话题，绕过自定义 covariance 逻辑。
+
+# -------------------------------
+# Control / acceleration prior
+# -------------------------------
+# 暂时不启用 control prediction。
+# 原因：
+#   如果没有稳定、可信、时间同步的 cmd_vel/control 输入，
+#   use_control=true 可能会把错误控制量引入 EKF prediction。
+use_control: false
+
+# 如果后续接入控制指令，再改成 true。
+# stamped_control:
+#   false 表示控制输入类型为 geometry_msgs/Twist；
+#   true  表示控制输入类型为 geometry_msgs/TwistStamped。
+stamped_control: false
+control_timeout: 0.2
+
+# vx, vy, vz, vroll, vpitch, vyaw
+# 当前只写入已知车辆前向 vx 加/减速度先验。
+# 若后续不使用 control，这些参数不会直接影响测量融合。
+control_config: [true, false, false, false, false, false]
+
+# 已知车辆前向最大加速度约 2.0 m/s^2。
+acceleration_limits: [2.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# 已知车辆前向最大减速度约 5.0 m/s^2。
+deceleration_limits: [5.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# gain=1.0 表示允许控制预测快速达到对应加/减速度限制。
+# 如果后续发现预测过激，可以适当降低到 0.6~0.8。
+acceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# 已知车辆最大速度约 3.5 m/s，但本节点不做速度硬限幅。
+# 速度异常先依赖 robot_localization 的 Mahalanobis rejection threshold 处理。
+
+# -------------------------------
+# Process noise
+# -------------------------------
+# 状态顺序：
+# x, y, z,
+# roll, pitch, yaw,
+# vx, vy, vz,
+# vroll, vpitch, vyaw,
+# ax, ay, az
+#
+# 这里先使用较保守的默认模板量级。
+# 后续如果 final_odom 响应慢，可以适当增大 vx/vy/vyaw 的 process noise；
+# 如果 final_odom 太抖，可以适当减小 vx/vy/vyaw 的 process noise。
+process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0.025, 0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0.02, 0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0.01, 0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0.01, 0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0.015]
+
+# 初始协方差保持默认小值即可。
+# 注意：当前节点已经通过 absolute pose 初始化门控避免 wheel/IMU 初始化为 0。
+initial_estimate_covariance: [1e-9, 0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    1e-9, 0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    1e-9, 0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    1e-9, 0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    1e-9, 0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    1e-9, 0,    0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    1e-9, 0,    0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    1e-9, 0,    0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    1e-9, 0,     0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    1e-9,  0,     0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     1e-9,  0,     0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     1e-9,  0,    0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     1e-9, 0,    0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    1e-9, 0,
+                              0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    1e-9]
