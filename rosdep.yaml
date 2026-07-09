@@ -1,0 +1,6 @@
+eigen:
+  ubuntu: [libeigen3-dev]
+geographiclib:
+  ubuntu: [libgeographic-dev]
+yaml-cpp:
+  ubuntu: [libyaml-cpp-dev]

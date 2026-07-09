@@ -1,0 +1,6 @@
+Package: udi-zpmc-robot-localization
+Version: 0.0.0
+Maintainer: guoliefeng <>
+Description: Robot localization sensor fusion package
+Architecture: amd64
+Depends: ros-noetic-angles, ros-noetic-diagnostic-msgs, ros-noetic-diagnostic-updater, ros-noetic-eigen-conversions, ros-noetic-geographic-msgs, ros-noetic-geometry-msgs, ros-noetic-message-filters, ros-noetic-message-runtime, ros-noetic-nav-msgs, ros-noetic-nodelet, ros-noetic-roscpp, ros-noetic-sensor-msgs, ros-noetic-std-msgs, ros-noetic-std-srvs, ros-noetic-tf2, ros-noetic-tf2-geometry-msgs, ros-noetic-tf2-ros, libgeographic-dev, libyaml-cpp-dev

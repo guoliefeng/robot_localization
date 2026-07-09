@@ -1,0 +1,21 @@
+include:
+  - remote: "https://oss.ud-x.com:30080/devops/builder/ci/template.yml"
+
+job_build_ros1_deb_ubuntu18_amd64:
+  extends: .job_build_ros1_deb_ubuntu18_amd64
+  variables:
+    MAX_THREADS: "8"
+
+job_build_ros1_deb_ubuntu20_arm64:
+  extends: .job_build_ros1_deb_ubuntu20_arm64
+  variables:
+    MAX_THREADS: "8"
+
+job_release_deb:
+  extends: .job_release_deb
+
+job_release_changelog:
+  extends: .job_release_changelog
+
+job_release_gitlab:
+  extends: .job_release_gitlab
