@@ -1,0 +1,27 @@
+<launch>
+  <arg name="use_sim_time" default="false" />
+  <arg name="set_use_sim_time" default="false" />
+  <arg name="ekf_config" default="$(find robot_loc)/params/loc_ekf.yaml" />
+  <arg name="filtered_odom_topic" default="/localization/final_odom" />
+
+  <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <node pkg="robot_loc"
+        type="yangpu_loc_ekf_node"
+        name="yangpu_loc_ekf"
+        output="log"
+        clear_params="true">
+    <rosparam command="load" file="$(arg ekf_config)" />
+
+    <param name="ins_odom_topic" value="/localization/ins" />
+    <param name="fusion_odom_topic" value="/lio_loc_result" />
+    <param name="localization_status_topic" value="/localization/status" />
+    <param name="loc_policy_topic" value="/localization/loc_policy_code" />
+    <param name="publish_filtered_odometry" value="false" />
+
+    <param name="frame_id" value="map" />
+    <param name="child_frame_id" value="base_link" />
+
+    <remap from="odometry/filtered" to="$(arg filtered_odom_topic)" />
+  </node>
+</launch>

@@ -38,7 +38,7 @@
 
 #include "robot_localization/filter_base.h"
 #include "robot_localization/filter_common.h"
-#include "robot_localization/SetPose.h"
+#include "robot_loc/SetPose.h"
 
 
 #include <diagnostic_msgs/DiagnosticArray.h>
@@ -147,7 +147,7 @@ class DiagnosticsHelper
     imu_pub_ = nh.advertise<sensor_msgs::Imu>("example/imu/data", 10);
 
     diagnostic_sub_ = nh.subscribe("/diagnostics", 10, &DiagnosticsHelper::diagnosticCallback, this);
-    set_pose_ = nh.serviceClient<robot_localization::SetPose>("/set_pose");
+    set_pose_ = nh.serviceClient<robot_loc::SetPose>("/set_pose");
   }
 
   void diagnosticCallback(const diagnostic_msgs::DiagnosticArrayPtr &msg)
@@ -176,7 +176,7 @@ class DiagnosticsHelper
 
   void setPose(ros::Time t)
   {
-    robot_localization::SetPose pose_;
+    robot_loc::SetPose pose_;
     pose_.request.pose = getValidPose();
     pose_.request.pose.header.stamp = t;
     set_pose_.call(pose_);

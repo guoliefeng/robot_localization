@@ -1,7 +1,7 @@
 <launch>
   <arg name="use_sim_time" default="false" />
   <arg name="set_use_sim_time" default="false" />
-  <arg name="ekf_config" default="$(find robot_localization)/params/loc_ekf_ins_imu.yaml" />
+  <arg name="ekf_config" default="$(find robot_loc)/params/loc_ekf_ins_imu.yaml" />
   <arg name="ins_odom_topic" default="/localization/ins" />
   <arg name="imu_topic" default="/ins_driver/imu" />
   <arg name="localization_status_topic" default="/localization/status" />
@@ -22,7 +22,7 @@
 
   <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
-  <node pkg="robot_localization"
+  <node pkg="robot_loc"
         type="loc_ekf_ins_imu_node"
         name="loc_ekf_ins_imu"
         output="screen"

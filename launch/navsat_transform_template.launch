@@ -22,7 +22,7 @@
      (3) The latitude, longitude, and altitude can be provided by:
            (a) a sensor_msgs/NavSatFix message
            (b) the "datum" service. See the template parameter file.
-     (4) Alternatively, at any time, the user can send a robot_localization/SetDatum service message to the "datum"
+     (4) Alternatively, at any time, the user can send a robot_loc/SetDatum service message to the "datum"
          service. This will manually set the latitude, longitude, altitude, and world-referenced heading, and will
          assume an odometry message containing all zeros. This will effectively set the origin at the specified
          lat/long, with the X-axis aligned with east. The user can set this datum via the "datum" service, or via the
@@ -37,8 +37,8 @@
 -->
 
 <launch>
-  <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" clear_params="true">
-    <rosparam command="load" file="$(find robot_localization)/params/navsat_transform_template.yaml" />
+  <node pkg="robot_loc" type="navsat_transform_node" name="navsat_transform_node" clear_params="true">
+    <rosparam command="load" file="$(find robot_loc)/params/navsat_transform_template.yaml" />
 
       <!-- Placeholders for input remapping. Set your topic names as the "to" values.
       <remap from="imu/data" to=""/>

@@ -12,7 +12,7 @@
 
     <node pkg="tf2_ros" type="static_transform_publisher" name="bl_imu" args="0 -0.3 0.52 -1.570796327 0 1.570796327 base_link imu_link" />
 
-    <node pkg="rosbag" type="play" name="rosbagplay" args="$(find robot_localization)/test/test1.bag --clock -d 25" required="true"/>
+    <node pkg="rosbag" type="play" name="rosbagplay" args="$(find robot_loc)/test/test1.bag --clock -d 25" required="true"/>
 
 	<node pkg="nodelet" type="nodelet" name="EKF_NODELET_MANAGER" args="manager"/>
 	<node pkg="nodelet" type="nodelet" name="test_ekf_localization_node_bag1_ekf" output="screen" args="load RobotLocalization/EkfNodelet EKF_NODELET_MANAGER" clear_params="true">
@@ -92,7 +92,7 @@
 
     </node>
 
-    <test test-name="test_ekf_localization_node_bag1_pose" pkg="robot_localization" type="test_ekf_localization_node_bag1" clear_params="true" time-limit="1000.0">
+    <test test-name="test_ekf_localization_node_bag1_pose" pkg="robot_loc" type="test_ekf_localization_node_bag1" clear_params="true" time-limit="1000.0">
       <param name="final_x" value="-40.0454"/>
       <param name="final_y" value="-76.9988"/>
       <param name="final_z" value="-2.6974"/>

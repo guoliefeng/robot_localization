@@ -123,7 +123,7 @@ namespace RosFilterUtilities
 
         if (!silent)
         {
-          ROS_WARN_STREAM_THROTTLE(2.0, "Transform from " << sourceFrame << " to " << targetFrame <<
+          ROS_WARN_STREAM_THROTTLE(15.0, "Transform from " << sourceFrame << " to " << targetFrame <<
                                         " was unavailable for the time requested. Using latest instead.\n");
         }
       }
@@ -131,7 +131,7 @@ namespace RosFilterUtilities
       {
         if (!silent)
         {
-          ROS_WARN_STREAM_THROTTLE(2.0, "Could not obtain transform from " << sourceFrame <<
+          ROS_WARN_STREAM_THROTTLE(15.0, "Could not obtain transform from " << sourceFrame <<
                                         " to " << targetFrame << ". Error was " << ex.what() << "\n");
         }
 

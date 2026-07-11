@@ -333,4 +333,4 @@ Published Transforms
 Services
 ========
 
-* ``set_pose`` - By issuing a `geometry_msgs/PoseWithCovarianceStamped <http://docs.ros.org/api/geometry_msgs/html/msg/PoseWithCovarianceStamped.html>`_ message to the ``set_pose`` topic, users can manually set the state of the filter. This is useful for resetting the filter during testing, and allows for interaction with ``rviz``. Alternatively, the state estimation nodes advertise a ``SetPose`` service, whose type is `robot_localization/SetPose <http://docs.ros.org/api/robot_localization/html/srv/SetPose.html>`_.
+* ``set_pose`` - By issuing a `geometry_msgs/PoseWithCovarianceStamped <http://docs.ros.org/api/geometry_msgs/html/msg/PoseWithCovarianceStamped.html>`_ message to the ``set_pose`` topic, users can manually set the state of the filter. This is useful for resetting the filter during testing, and allows for interaction with ``rviz``. Alternatively, the state estimation nodes advertise a ``SetPose`` service, whose type is `robot_loc/SetPose <http://docs.ros.org/api/robot_loc/html/srv/SetPose.html>`_.

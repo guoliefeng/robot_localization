@@ -26,7 +26,7 @@ imu_use_linear_acceleration: false
 
 ```bash
 roslaunch localization_switcher analysis.launch record:=false start_rviz:=false
-roslaunch robot_localization loc_ekf_ins_imu_wheel.launch \
+roslaunch robot_loc loc_ekf_ins_imu_wheel.launch \
   test_drop_ins_enabled:=true \
   test_drop_ins_period_sec:=1000 \
   ...

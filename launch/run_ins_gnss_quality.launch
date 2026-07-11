@@ -1,0 +1,20 @@
+<launch>
+  <arg name="use_sim_time" default="false" />
+  <arg name="set_use_sim_time" default="true" />
+  <arg name="ekf_config" default="$(find robot_loc)/params/gnss_quality_ins_ekf.yaml" />
+  <arg name="ins_odom_topic" default="/localization/ins" />
+  <arg name="devpvt_topic" default="/chcnav/devpvt" />
+
+  <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <node pkg="robot_loc"
+        type="gnss_quality_ins_ekf_node"
+        name="gnss_quality_ins_ekf"
+        output="screen"
+        clear_params="true">
+    <rosparam command="load" file="$(arg ekf_config)" />
+    <param name="ins_odom_topic" value="$(arg ins_odom_topic)" />
+    <param name="gnss_quality_monitor/devpvt_topic" value="$(arg devpvt_topic)" />
+    <remap from="odometry/filtered" to="/localization/final_odom" />
+  </node>
+</launch>

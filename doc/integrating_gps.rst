@@ -51,7 +51,7 @@ These data can be obtained in three different ways:
 
  The parameter order is ``latitude`` in decimal degrees, ``longitude`` in decimal degrees, ``heading`` in radians) the ``frame_id`` of your robot's world frame (i.e., the value of the ``world_frame`` parameter in a ``robot_localization`` state estimation node), and the ``frame_id`` of your robot's body frame (i.e., the value of the ``base_link_frame`` parameter in a ``robot_localization`` state estimation node). When this mode is used, the robot assumes that your robot's world frame origin is at the specified latitude and longitude and with a heading of :math:`0` (east). 
 
-3. The datum can be set manually via the ``set_datum`` service and using the `robot_localization/SetDatum <http://docs.ros.org/api/robot_localization/html/srv/SetDatum.html>`_ service message. 
+3. The datum can be set manually via the ``set_datum`` service and using the `robot_loc/SetDatum <http://docs.ros.org/api/robot_loc/html/srv/SetDatum.html>`_ service message. 
 
 
 GPS Data
@@ -93,7 +93,7 @@ Below is the ``navsat_transform_node`` launch file we'll use for this tutorial:
 
  <launch>
 
-   <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" respawn="true">
+   <node pkg="robot_loc" type="navsat_transform_node" name="navsat_transform_node" respawn="true">
 
      <param name="magnetic_declination_radians" value="0"/>
 
@@ -101,7 +101,7 @@ Below is the ``navsat_transform_node`` launch file we'll use for this tutorial:
 
      <remap from="/imu/data" to="/your/imu/topic" />
      <remap from="/gps/fix" to="/your/gps/fix/topic" />
-     <remap from="/odometry/filtered" to="/your/robot_localization/output/topic" />
+     <remap from="/odometry/filtered" to="/your/robot_loc/output/topic" />
 
    </node>
 

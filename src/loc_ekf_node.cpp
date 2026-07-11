@@ -6,14 +6,18 @@
 #include "robot_localization/filter_common.h"
 #include "robot_localization/ros_filter_types.h"
 
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
 #include <std_msgs/UInt64.h>
 #include <std_msgs/UInt8.h>
+#include <tf2/utils.h>
+#include <udi_msgs/LocalizationEstimate.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
 #include <mutex>
 #include <numeric>
 #include <string>
@@ -96,6 +100,30 @@ RobotLocalization::CallbackData makeCallbackData(
 bool hasPolicy(const unsigned long long policy, const LocalizationPolicy flag)
 {
   return (policy & static_cast<unsigned long long>(flag)) != 0;
+}
+
+double standardDeviation(const double variance)
+{
+  return std::sqrt(std::max(0.0, variance));
+}
+
+bool isValidAbsolutePose(const nav_msgs::Odometry &odom)
+{
+  const geometry_msgs::Point &position = odom.pose.pose.position;
+  const geometry_msgs::Quaternion &orientation = odom.pose.pose.orientation;
+  const double quaternion_norm_squared =
+    orientation.x * orientation.x + orientation.y * orientation.y +
+    orientation.z * orientation.z + orientation.w * orientation.w;
+
+  return !odom.header.stamp.isZero() &&
+         std::isfinite(position.x) &&
+         std::isfinite(position.y) &&
+         std::isfinite(position.z) &&
+         std::isfinite(orientation.x) &&
+         std::isfinite(orientation.y) &&
+         std::isfinite(orientation.z) &&
+         std::isfinite(orientation.w) &&
+         quaternion_norm_squared > 1e-12;
 }
 
 void clearCovariances(nav_msgs::Odometry &odom)
@@ -190,6 +218,14 @@ public:
 
     ekf_.initialize();
 
+    localization_estimate_pub_ =
+      nh_.advertise<udi_msgs::LocalizationEstimate>(localization_estimate_topic_, 10);
+    filtered_odom_pub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 100);
+    localization_estimate_timer_ = nh_.createTimer(
+      ros::Duration(1.0 / localization_estimate_frequency_),
+      &LocEkfNode::publishLocalizationEstimate,
+      this);
+
     ins_sub_ = nh_.subscribe(ins_topic_, 100, &LocEkfNode::insCb, this);
     fusion_sub_ = nh_.subscribe(fusion_topic_, 100, &LocEkfNode::fusionCb, this);
     localization_status_sub_ = nh_.subscribe(
@@ -219,6 +255,16 @@ private:
     nh_priv_.param("ins_twist_rejection_threshold", ins_twist_rejection_threshold_, 3.0);
     nh_priv_.param("fusion_pose_rejection_threshold", fusion_pose_rejection_threshold_, 3.0);
     nh_priv_.param("fusion_twist_rejection_threshold", fusion_twist_rejection_threshold_, 3.0);
+    nh_priv_.param(
+      "localization_estimate_topic", localization_estimate_topic_,
+      std::string("/localization_estimate1"));
+    nh_priv_.param(
+      "localization_estimate_frequency", localization_estimate_frequency_, 100.0);
+    if (localization_estimate_frequency_ <= 0.0)
+    {
+      ROS_WARN("localization_estimate_frequency must be positive; using 100 Hz");
+      localization_estimate_frequency_ = 100.0;
+    }
   }
 
   void configureCallbackData()
@@ -240,6 +286,34 @@ private:
   {
     odom.header.frame_id = frame_id_;
     odom.child_frame_id = child_frame_id_;
+  }
+
+  bool initializeFromAbsolutePose(
+    const nav_msgs::Odometry &odom,
+    const std::string &source_name)
+  {
+    if (!isValidAbsolutePose(odom))
+    {
+      ROS_WARN_STREAM_THROTTLE(
+        1.0,
+        "Waiting for a valid absolute pose from " << source_name
+                                                   << " before initializing EKF");
+      return false;
+    }
+
+    geometry_msgs::PoseWithCovarianceStampedPtr initial_pose(
+      new geometry_msgs::PoseWithCovarianceStamped());
+    initial_pose->header = odom.header;
+    initial_pose->pose = odom.pose;
+    ekf_.setPoseCallback(initial_pose);
+    absolute_pose_initialized_ = true;
+
+    ROS_INFO_STREAM(
+      "Initialized EKF from " << source_name
+                               << " absolute pose at stamp=" << odom.header.stamp
+                               << " x=" << odom.pose.pose.position.x
+                               << " y=" << odom.pose.pose.position.y);
+    return true;
   }
 
   LocDecision currentDecision() const
@@ -302,6 +376,16 @@ private:
   {
     if (decision.status == LocalizationStatus::LOST ||
         decision.status == LocalizationStatus::DR)
+    {
+      return SourceMode::DROP;
+    }
+
+    // SECONDARY + USE_GNSS means localization_switcher has rejected the
+    // /lio_loc_result primary source and selected trusted INS. Do not keep a
+    // weak LIO observation in the EKF: a slow LIO drift can otherwise keep
+    // pulling final_odom away from the selected INS source.
+    if (decision.status == LocalizationStatus::SECONDARY &&
+        hasPolicy(decision.policy, LocalizationPolicy::USE_GNSS))
     {
       return SourceMode::DROP;
     }
@@ -373,8 +457,50 @@ private:
     }
   }
 
+  bool initializeIfNeeded(
+    const nav_msgs::Odometry &odom,
+    const std::string &source_name,
+    const bool is_ins,
+    bool &initialized_now)
+  {
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    initialized_now = false;
+    if (absolute_pose_initialized_)
+    {
+      return true;
+    }
+
+    nav_msgs::Odometry initial_pose(odom);
+    // Initialization must not depend on startup status/policy messages. Use
+    // the trusted absolute-pose covariance for the selected source.
+    if (is_ins)
+    {
+      applyInsCovariance(initial_pose, SourceMode::PRIMARY);
+    }
+    else
+    {
+      applyFusionCovariance(initial_pose, SourceMode::PRIMARY);
+    }
+
+    initialized_now = initializeFromAbsolutePose(initial_pose, source_name);
+    return initialized_now;
+  }
+
   void insCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
+    nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
+    normalizeOdomFrame(*out);
+
+    bool initialized_now = false;
+    if (!initializeIfNeeded(*out, "INS", true, initialized_now))
+    {
+      return;
+    }
+    if (initialized_now)
+    {
+      return;
+    }
+
     LocDecision decision;
     {
       std::lock_guard<std::mutex> lock(state_mtx_);
@@ -392,8 +518,6 @@ private:
       return;
     }
 
-    nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
-    normalizeOdomFrame(*out);
     applyInsCovariance(*out, ins_mode);
 
     ekf_.odometryCallback(out, "ins_odom", ins_pose_cb_data_, ins_twist_cb_data_);
@@ -402,6 +526,19 @@ private:
 
   void fusionCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
+    nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
+    normalizeOdomFrame(*out);
+
+    bool initialized_now = false;
+    if (!initializeIfNeeded(*out, "LIO", false, initialized_now))
+    {
+      return;
+    }
+    if (initialized_now)
+    {
+      return;
+    }
+
     LocDecision decision;
     {
       std::lock_guard<std::mutex> lock(state_mtx_);
@@ -419,8 +556,6 @@ private:
       return;
     }
 
-    nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
-    normalizeOdomFrame(*out);
     applyFusionCovariance(*out, fusion_mode);
 
     ekf_.odometryCallback(out, "fusion_odom", fusion_pose_cb_data_, fusion_twist_cb_data_);
@@ -439,6 +574,104 @@ private:
     std::lock_guard<std::mutex> lock(state_mtx_);
     loc_decision_.policy = msg->data;
     loc_decision_.last_policy_stamp = ros::Time::now();
+  }
+
+  void publishLocalizationEstimate(const ros::TimerEvent &)
+  {
+    nav_msgs::Odometry odom;
+    if (!ekf_.getFilteredOdometryMessage(odom))
+    {
+      return;
+    }
+
+    geometry_msgs::AccelWithCovarianceStamped acceleration;
+    const bool has_acceleration = ekf_.getFilteredAccelMessage(acceleration);
+    double yaw = 0.0;
+    double pitch = 0.0;
+    double roll = 0.0;
+    tf2::getEulerYPR(odom.pose.pose.orientation, yaw, pitch, roll);
+    const double cos_yaw = std::cos(yaw);
+    const double sin_yaw = std::sin(yaw);
+
+    // nav_msgs/Odometry twist is expressed in child_frame_id. Convert it to
+    // the world frame for the corresponding UDI pose fields.
+    const double vx_vrf = odom.twist.twist.linear.x;
+    const double vy_vrf = odom.twist.twist.linear.y;
+    const double vz_vrf = odom.twist.twist.linear.z;
+    const double vx_map = cos_yaw * vx_vrf - sin_yaw * vy_vrf;
+    const double vy_map = sin_yaw * vx_vrf + cos_yaw * vy_vrf;
+
+    udi_msgs::LocalizationEstimate estimate;
+    estimate.header.timestamp_sec = ros::Time::now().toSec();
+    estimate.header.sequence_num = localization_estimate_sequence_++;
+    estimate.header.frame_id = odom.header.frame_id;
+
+    estimate.pose.position.x = odom.pose.pose.position.x;
+    estimate.pose.position.y = odom.pose.pose.position.y;
+    estimate.pose.position.z = odom.pose.pose.position.z;
+    estimate.pose.orientation.qx = odom.pose.pose.orientation.x;
+    estimate.pose.orientation.qy = odom.pose.pose.orientation.y;
+    estimate.pose.orientation.qz = odom.pose.pose.orientation.z;
+    estimate.pose.orientation.qw = odom.pose.pose.orientation.w;
+    estimate.pose.heading = yaw;
+    estimate.pose.euler_angles.x = yaw;
+    estimate.pose.euler_angles.y = pitch;
+    estimate.pose.euler_angles.z = roll;
+
+    estimate.pose.linear_velocity.x = vx_map;
+    estimate.pose.linear_velocity.y = vy_map;
+    estimate.pose.linear_velocity.z = vz_vrf;
+    estimate.pose.linear_velocity_vrf.x = vx_vrf;
+    estimate.pose.linear_velocity_vrf.y = vy_vrf;
+    estimate.pose.linear_velocity_vrf.z = vz_vrf;
+
+    estimate.pose.angular_velocity.x = odom.twist.twist.angular.x;
+    estimate.pose.angular_velocity.y = odom.twist.twist.angular.y;
+    estimate.pose.angular_velocity.z = odom.twist.twist.angular.z;
+    estimate.pose.angular_velocity_vrf = estimate.pose.angular_velocity;
+
+    if (has_acceleration)
+    {
+      const double ax_vrf = acceleration.accel.accel.linear.x;
+      const double ay_vrf = acceleration.accel.accel.linear.y;
+      const double az_vrf = acceleration.accel.accel.linear.z;
+      estimate.pose.linear_acceleration.x = cos_yaw * ax_vrf - sin_yaw * ay_vrf;
+      estimate.pose.linear_acceleration.y = sin_yaw * ax_vrf + cos_yaw * ay_vrf;
+      estimate.pose.linear_acceleration.z = az_vrf;
+      estimate.pose.linear_acceleration_vrf.x = ax_vrf;
+      estimate.pose.linear_acceleration_vrf.y = ay_vrf;
+      estimate.pose.linear_acceleration_vrf.z = az_vrf;
+      estimate.pose.angular_velocity_vrf.x = acceleration.accel.accel.angular.x;
+      estimate.pose.angular_velocity_vrf.y = acceleration.accel.accel.angular.y;
+      estimate.pose.angular_velocity_vrf.z = acceleration.accel.accel.angular.z;
+    }
+
+    estimate.uncertainty.position_std_dev.x = standardDeviation(odom.pose.covariance[0]);
+    estimate.uncertainty.position_std_dev.y = standardDeviation(odom.pose.covariance[7]);
+    estimate.uncertainty.position_std_dev.z = standardDeviation(odom.pose.covariance[14]);
+    estimate.uncertainty.orientation_std_dev.x = standardDeviation(odom.pose.covariance[21]);
+    estimate.uncertainty.orientation_std_dev.y = standardDeviation(odom.pose.covariance[28]);
+    estimate.uncertainty.orientation_std_dev.z = standardDeviation(odom.pose.covariance[35]);
+    estimate.uncertainty.linear_velocity_std_dev.x = standardDeviation(odom.twist.covariance[0]);
+    estimate.uncertainty.linear_velocity_std_dev.y = standardDeviation(odom.twist.covariance[7]);
+    estimate.uncertainty.linear_velocity_std_dev.z = standardDeviation(odom.twist.covariance[14]);
+    estimate.uncertainty.angular_velocity_std_dev.x = standardDeviation(odom.twist.covariance[21]);
+    estimate.uncertainty.angular_velocity_std_dev.y = standardDeviation(odom.twist.covariance[28]);
+    estimate.uncertainty.angular_velocity_std_dev.z = standardDeviation(odom.twist.covariance[35]);
+
+    filtered_odom_pub_.publish(odom);
+
+    if (has_acceleration)
+    {
+      estimate.uncertainty.linear_acceleration_std_dev.x =
+        standardDeviation(acceleration.accel.covariance[0]);
+      estimate.uncertainty.linear_acceleration_std_dev.y =
+        standardDeviation(acceleration.accel.covariance[7]);
+      estimate.uncertainty.linear_acceleration_std_dev.z =
+        standardDeviation(acceleration.accel.covariance[14]);
+    }
+
+    localization_estimate_pub_.publish(estimate);
   }
 
   void logStatus(
@@ -466,9 +699,13 @@ private:
   ros::Subscriber fusion_sub_;
   ros::Subscriber localization_status_sub_;
   ros::Subscriber loc_policy_sub_;
+  ros::Publisher localization_estimate_pub_;
+  ros::Publisher filtered_odom_pub_;
+  ros::Timer localization_estimate_timer_;
 
   mutable std::mutex state_mtx_;
   LocDecision loc_decision_;
+  bool absolute_pose_initialized_ = false;
 
   std::string ins_topic_;
   std::string fusion_topic_;
@@ -476,8 +713,10 @@ private:
   std::string loc_policy_topic_;
   std::string frame_id_;
   std::string child_frame_id_;
+  std::string localization_estimate_topic_;
 
   double state_timeout_sec_;
+  double localization_estimate_frequency_ = 100.0;
   double ins_pose_rejection_threshold_ = 5.0;
   double ins_twist_rejection_threshold_ = 3.0;
   double fusion_pose_rejection_threshold_ = 3.0;
@@ -492,13 +731,16 @@ private:
   uint64_t ins_drop_count_ = 0;
   uint64_t fusion_count_ = 0;
   uint64_t fusion_drop_count_ = 0;
+  uint32_t localization_estimate_sequence_ = 0;
 };
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "loc_ekf_node");
   LocEkfNode node;
-  ros::spin();
+  ros::AsyncSpinner spinner(2);
+  spinner.start();
+  ros::waitForShutdown();
 
   return EXIT_SUCCESS;
 }

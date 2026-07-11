@@ -1,5 +1,5 @@
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Changelog for package robot_localization
+Changelog for package robot_loc
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 2.7.7 (2024-08-29)
@@ -333,4 +333,3 @@ Changelog for package robot_localization
 2.1.1 (2014-04-11)
 ------------------
 * Added cmake_modules dependency for Eigen support, and added include to silence boost::signals warning from tf include
-

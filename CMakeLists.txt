@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(robot_localization)
+project(robot_loc)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   message("${PROJECT_NAME}: You did not request a specific build type: selecting 'RelWithDebInfo'.")
@@ -8,6 +8,7 @@ endif()
 
 find_package(catkin REQUIRED COMPONENTS
   angles
+  chcnav_msgs
   diagnostic_msgs
   diagnostic_updater
   eigen_conversions
@@ -24,7 +25,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_srvs
   tf2
   tf2_geometry_msgs
-  tf2_ros)
+  tf2_ros
+  udi_msgs)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(YAML_CPP yaml-cpp)
@@ -86,6 +88,7 @@ catkin_package(
     ekf_localization_nodelet
     filter_base
     filter_utilities
+    gnss_quality_monitor
     navsat_transform
     navsat_transform_nodelet
     ros_filter
@@ -96,6 +99,7 @@ catkin_package(
     ukf_localization_nodelet
   CATKIN_DEPENDS
     angles
+    chcnav_msgs
     cmake_modules
     diagnostic_msgs
     diagnostic_updater
@@ -112,6 +116,7 @@ catkin_package(
     tf2
     tf2_geometry_msgs
     tf2_ros
+    udi_msgs
   DEPENDS
     ${EIGEN_PACKAGE}
     GeographicLib
@@ -140,6 +145,7 @@ add_library(filter_utilities src/filter_utilities.cpp)
 add_library(filter_base src/filter_base.cpp)
 add_library(ekf src/ekf.cpp)
 add_library(ukf src/ukf.cpp)
+add_library(gnss_quality_monitor src/gnss_quality_monitor.cpp)
 add_library(robot_localization_estimator src/robot_localization_estimator.cpp)
 add_library(ros_robot_localization_listener src/ros_robot_localization_listener.cpp)
 add_library(ros_filter_utilities src/ros_filter_utilities.cpp)
@@ -158,10 +164,13 @@ add_executable(yangpu_loc_ekf_node src/loc_ekf_node.cpp)
 add_executable(loc_ekf_multi_sensor_node src/loc_ekf_multi_sensor_node.cpp)
 add_executable(loc_ekf_ins_imu_node src/loc_ekf_ins_imu_node.cpp)
 add_executable(loc_ekf_ins_imu_wheel_node src/loc_ekf_ins_imu_wheel_node.cpp)
+add_executable(gnss_quality_ins_ekf_node src/gnss_quality_ins_ekf_node.cpp)
 
 # Dependencies
 add_dependencies(filter_base ${PROJECT_NAME}_gencpp)
 add_dependencies(navsat_transform ${PROJECT_NAME}_gencpp)
+add_dependencies(gnss_quality_monitor ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
+add_dependencies(gnss_quality_ins_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(robot_localization_listener_node ${PROJECT_NAME}_gencpp)
 add_dependencies(yangpu_loc_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(loc_ekf_multi_sensor_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
@@ -174,7 +183,9 @@ target_link_libraries(filter_utilities ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
 target_link_libraries(filter_base filter_utilities ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
 target_link_libraries(ekf filter_base ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
 target_link_libraries(ukf filter_base ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
+target_link_libraries(gnss_quality_monitor ${catkin_LIBRARIES})
 target_link_libraries(ros_filter ekf ukf ros_filter_utilities ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES})
+target_link_libraries(gnss_quality_ins_ekf_node ros_filter gnss_quality_monitor ${catkin_LIBRARIES})
 target_link_libraries(robot_localization_estimator filter_utilities filter_base ekf ukf ${EIGEN3_LIBRARIES})
 target_link_libraries(ros_robot_localization_listener robot_localization_estimator ros_filter_utilities
   ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES} ${YAML_CPP_LIBRARIES})
@@ -201,6 +212,7 @@ install(TARGETS
   ekf_localization_nodelet
   filter_base
   filter_utilities
+  gnss_quality_monitor
   navsat_transform
   navsat_transform_nodelet
   ros_filter
@@ -220,13 +232,14 @@ install(TARGETS
   yangpu_loc_ekf_node
   loc_ekf_multi_sensor_node
   loc_ekf_ins_imu_node
+  gnss_quality_ins_ekf_node
   loc_ekf_ins_imu_wheel_node
   ukf_localization_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 ## Mark cpp header files for installation
-install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+install(DIRECTORY include/robot_localization/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}/robot_localization
   FILES_MATCHING PATTERN "*.h"
   PATTERN ".svn" EXCLUDE)
 

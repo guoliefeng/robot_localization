@@ -12,7 +12,7 @@ rosbag play 223_7_6_* --clock
 启动方式：
 
 ```bash
-roslaunch robot_localization ins_lio_differential_ekf.launch set_use_sim_time:=true use_sim_time:=true
+roslaunch robot_loc ins_lio_differential_ekf.launch set_use_sim_time:=true use_sim_time:=true
 ```
 
 ## 结论

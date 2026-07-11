@@ -31,9 +31,9 @@
  */
 
 #include "robot_localization/navsat_transform.h"
-#include <robot_localization/SetDatum.h>
-#include <robot_localization/ToLL.h>
-#include <robot_localization/FromLL.h>
+#include <robot_loc/SetDatum.h>
+#include <robot_loc/ToLL.h>
+#include <robot_loc/FromLL.h>
 
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/NavSatFix.h>
@@ -45,13 +45,13 @@
 TEST(NavSatTransformUTMJumpTest, UtmTest)
 {
   ros::NodeHandle nh;
-  ros::ServiceClient set_datum_client = nh.serviceClient<robot_localization::SetDatum>("/datum");
-  ros::ServiceClient from_ll_client = nh.serviceClient<robot_localization::FromLL>("/fromLL");
+  ros::ServiceClient set_datum_client = nh.serviceClient<robot_loc::SetDatum>("/datum");
+  ros::ServiceClient from_ll_client = nh.serviceClient<robot_loc::FromLL>("/fromLL");
 
   EXPECT_TRUE(set_datum_client.waitForExistence(ros::Duration(5)));
 
   // Initialise the navsat_transform node to a UTM zone
-  robot_localization::SetDatum set_datum_srv;
+  robot_loc::SetDatum set_datum_srv;
   set_datum_srv.request.geo_pose.position.latitude = 1;
   set_datum_srv.request.geo_pose.position.longitude = 4;
   set_datum_srv.request.geo_pose.orientation.w = 1;
@@ -61,7 +61,7 @@ TEST(NavSatTransformUTMJumpTest, UtmTest)
   ros::Duration(0.2).sleep();
 
   // Request the GPS point of said point:
-  robot_localization::FromLL from_ll_srv;
+  robot_loc::FromLL from_ll_srv;
   from_ll_srv.request.ll_point.latitude = 10;
   from_ll_srv.request.ll_point.longitude = 4.5;
   EXPECT_TRUE(from_ll_client.call(from_ll_srv));
@@ -88,7 +88,7 @@ TEST(NavSatTransformUTMJumpTest, UtmTest)
 TEST(NavSatTransformUTMJumpTest, UtmServiceTest)
 {
   ros::NodeHandle nh;
-  ros::ServiceClient set_zone_client = nh.serviceClient<robot_localization::SetUTMZone>("/setUTMZone");
+  ros::ServiceClient set_zone_client = nh.serviceClient<robot_loc::SetUTMZone>("/setUTMZone");
   tf2_ros::Buffer tf_buffer;
   tf2_ros::TransformListener tf_listener(tf_buffer);
 
@@ -112,7 +112,7 @@ TEST(NavSatTransformUTMJumpTest, UtmServiceTest)
   odom_msg.pose.pose.orientation.w = 1;
 
   // Initialise the navsat_transform node to a UTM zone
-  robot_localization::SetUTMZone set_zone_srv;
+  robot_loc::SetUTMZone set_zone_srv;
   set_zone_srv.request.utm_zone = "30U";
   EXPECT_TRUE(set_zone_client.call(set_zone_srv));
   gps_msg.header.stamp = ros::Time::now();

@@ -56,8 +56,10 @@ esac
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
+apt install -y udx-ads-chcnav-msgs unity-drive-udi-msgs 
 
-# Keep this list limited to dependencies used by the robot_localization ROS1 targets.
+
+# Keep this list limited to dependencies used by the robot_loc ROS1 targets.
 system_packages=(
     build-essential
     ca-certificates
@@ -104,21 +106,25 @@ ros_packages=(
 apt-get install -y --no-install-recommends "${system_packages[@]}" "${ros_packages[@]}"
 
 builder_url="https://oss.ud-x.com:30080/devops/builder/ros/build.sh"
-echo "Building robot_localization ${package_version} for ROS ${ROS_DISTRO} with ${threads} thread(s)."
+echo "Building robot_loc ${package_version} for ROS ${ROS_DISTRO} with ${threads} thread(s)."
 (
     cd "${ros_package_dir}"
     curl -fsSL "${builder_url}" | bash -s -- -o udi-zpmc -v "${package_version}" -j "${threads}"
 )
 
 shopt -s nullglob
-artifacts=("${script_dir}"/*.deb)
+artifacts=("${script_dir}"/*.deb "${script_dir}/../"*.deb)
 if [[ ${#artifacts[@]} -eq 0 ]]; then
-    echo "The ROS builder completed but no deb package was produced in ${script_dir}."
+    echo "The ROS builder completed but no deb package was produced in ${script_dir} or ${script_dir}/../."
     exit 1
 fi
 
 for artifact in "${artifacts[@]}"; do
-    mv -f "${artifact}" "${script_dir}/../"
+    artifact_dir=$(cd "$(dirname "${artifact}")" && pwd)
+    output_dir=$(cd "${script_dir}/../" && pwd)
+    if [[ "${artifact_dir}" != "${output_dir}" ]]; then
+        mv -f "${artifact}" "${output_dir}/"
+    fi
 done
 
 echo "Generated package(s):"

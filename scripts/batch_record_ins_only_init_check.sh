@@ -50,7 +50,7 @@ for dataset in $DATASETS; do
 
   rosparam set /use_sim_time true
 
-  roslaunch robot_localization ins_only_init_check.launch use_sim_time:=true \
+  roslaunch robot_loc ins_only_init_check.launch use_sim_time:=true \
     >"$OUT_DIR/ins_only_init_check.launch.log" 2>&1 &
   LAUNCH_PID=$!
 

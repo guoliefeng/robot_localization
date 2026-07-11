@@ -35,4 +35,4 @@ repo_url: ''
 srvs:
 - SetPose
 - SetDatum
-url: http://ros.org/wiki/robot_localization
+url: http://ros.org/wiki/robot_loc

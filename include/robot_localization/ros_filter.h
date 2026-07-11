@@ -37,8 +37,8 @@
 #include "robot_localization/filter_common.h"
 #include "robot_localization/filter_base.h"
 
-#include <robot_localization/SetPose.h>
-#include <robot_localization/ToggleFilterProcessing.h>
+#include <robot_loc/SetPose.h>
+#include <robot_loc/ToggleFilterProcessing.h>
 
 #include <ros/ros.h>
 #include <std_msgs/String.h>
@@ -66,6 +66,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <queue>
 #include <string>
@@ -145,8 +146,8 @@ template<class T> class RosFilter
     //! @param[in] request - The state requested, on (True) or off (False)
     //! @param[out] response - status if upon success
     //! @return boolean true if successful, false if not
-    bool toggleFilterProcessingCallback(robot_localization::ToggleFilterProcessing::Request&,
-                                        robot_localization::ToggleFilterProcessing::Response&);
+    bool toggleFilterProcessingCallback(robot_loc::ToggleFilterProcessing::Request&,
+                                        robot_loc::ToggleFilterProcessing::Response&);
 
     //! @brief Callback method for receiving all acceleration (IMU) messages
     //! @param[in] msg - The ROS IMU message to take in.
@@ -276,8 +277,8 @@ template<class T> class RosFilter
     //!
     //! @param[in] request - Custom service request with pose information
     //! @return true if successful, false if not
-    bool setPoseSrvCallback(robot_localization::SetPose::Request& request,
-                            robot_localization::SetPose::Response&);
+    bool setPoseSrvCallback(robot_loc::SetPose::Request& request,
+                            robot_loc::SetPose::Response&);
 
     //! @brief Service callback for manually enable the filter
     //! @param[in] request - N/A
@@ -475,6 +476,11 @@ template<class T> class RosFilter
     //! @brief Whether we publish the acceleration
     //!
     bool publishAcceleration_;
+
+    //! @brief Whether periodicUpdate publishes the filtered odometry directly.
+    //!
+    //! Some high-rate wrappers publish the latest state from their own timer.
+    bool publishFilteredOdometry_;
 
     //! @brief Whether we publish the transform from the world_frame to the base_link_frame
     //!
@@ -753,6 +759,9 @@ template<class T> class RosFilter
     //! @brief Used for updating the diagnostics
     //!
     diagnostic_updater::Updater diagnosticUpdater_;
+
+    // Callbacks and the periodic update may run on different spinner threads.
+    std::recursive_mutex filterMutex_;
 
     //! @brief Transform buffer for managing coordinate transforms
     //!

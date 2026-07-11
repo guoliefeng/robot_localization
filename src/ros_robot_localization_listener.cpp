@@ -514,7 +514,7 @@ bool RosRobotLocalizationListener::getState(const ros::Time& ros_time, const std
   double time;
   if ( ros_time.isZero() )
   {
-    ROS_INFO("Ros Robot Localization Listener: State requested at time = zero, returning state at current time");
+    ROS_INFO_THROTTLE(5.0,"Ros Robot Localization Listener: State requested at time = zero, returning state at current time");
     time = ros::Time::now().toSec();
   }
   else

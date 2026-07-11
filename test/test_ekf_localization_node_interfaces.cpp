@@ -30,7 +30,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "robot_localization/SetPose.h"
+#include "robot_loc/SetPose.h"
 
 #include <ros/ros.h>
 #include <nav_msgs/Odometry.h>
@@ -51,9 +51,9 @@ bool stateUpdated_;
 void resetFilter()
 {
   ros::NodeHandle nh;
-  ros::ServiceClient client = nh.serviceClient<robot_localization::SetPose>("/set_pose");
+  ros::ServiceClient client = nh.serviceClient<robot_loc::SetPose>("/set_pose");
 
-  robot_localization::SetPose setPose;
+  robot_loc::SetPose setPose;
   setPose.request.pose.pose.pose.orientation.w = 1;
   setPose.request.pose.header.frame_id = "odom";
   for (size_t ind = 0; ind < 36; ind+=7)

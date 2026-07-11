@@ -63,6 +63,7 @@ namespace RobotLocalization
       predictToCurrentTime_(false),
       printDiagnostics_(true),
       publishAcceleration_(false),
+      publishFilteredOdometry_(true),
       publishTransform_(true),
       resetOnTimeJump_(false),
       smoothLaggedData_(false),
@@ -160,6 +161,7 @@ namespace RobotLocalization
   template<typename T>
   void RosFilter<T>::reset()
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // Get rid of any initial poses (pretend we've never had a measurement)
     initialMeasurements_.clear();
     previousMeasurements_.clear();
@@ -188,9 +190,10 @@ namespace RobotLocalization
   }
 
   template<typename T>
-  bool RosFilter<T>::toggleFilterProcessingCallback(robot_localization::ToggleFilterProcessing::Request& req,
-                                                    robot_localization::ToggleFilterProcessing::Response& resp)
+  bool RosFilter<T>::toggleFilterProcessingCallback(robot_loc::ToggleFilterProcessing::Request& req,
+                                                    robot_loc::ToggleFilterProcessing::Response& resp)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     if (req.on == toggledOn_)
     {
       ROS_WARN_STREAM("Service was called to toggle filter processing but state was already as requested.");
@@ -198,7 +201,7 @@ namespace RobotLocalization
     }
     else
     {
-      ROS_INFO("Toggling filter measurement filtering to %s.", req.on ? "On" : "Off");
+      ROS_INFO_THROTTLE(5.0,"Toggling filter measurement filtering to %s.", req.on ? "On" : "Off");
       toggledOn_ = req.on;
       resp.status = true;
     }
@@ -210,6 +213,7 @@ namespace RobotLocalization
   void RosFilter<T>::accelerationCallback(const sensor_msgs::Imu::ConstPtr &msg, const CallbackData &callbackData,
     const std::string &targetFrame)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // If we've just reset the filter, then we want to ignore any messages
     // that arrive with an older timestamp
     if (msg->header.stamp <= lastSetPoseTime_)
@@ -292,6 +296,7 @@ namespace RobotLocalization
   template<typename T>
   void RosFilter<T>::controlCallback(const geometry_msgs::Twist::ConstPtr &msg)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     geometry_msgs::TwistStampedPtr twistStampedPtr = geometry_msgs::TwistStampedPtr(new geometry_msgs::TwistStamped());
     twistStampedPtr->twist = *msg;
     twistStampedPtr->header.frame_id = baseLinkFrameId_;
@@ -302,6 +307,7 @@ namespace RobotLocalization
   template<typename T>
   void RosFilter<T>::controlCallback(const geometry_msgs::TwistStamped::ConstPtr &msg)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     if (msg->header.frame_id == baseLinkFrameId_ || msg->header.frame_id == "")
     {
       latestControl_(ControlMemberVx) = msg->twist.linear.x;
@@ -376,6 +382,7 @@ namespace RobotLocalization
   template<typename T>
   bool RosFilter<T>::getFilteredOdometryMessage(nav_msgs::Odometry &message)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // If the filter has received a measurement at some point...
     if (filter_.getInitializedStatus())
     {
@@ -435,6 +442,7 @@ namespace RobotLocalization
   template<typename T>
   bool RosFilter<T>::getFilteredAccelMessage(geometry_msgs::AccelWithCovarianceStamped &message)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // If the filter has received a measurement at some point...
     if (filter_.getInitializedStatus())
     {
@@ -485,6 +493,7 @@ namespace RobotLocalization
                                  const CallbackData &twistCallbackData,
                                  const CallbackData &accelCallbackData)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     RF_DEBUG("------ RosFilter::imuCallback (" << topicName << ") ------\n" << "IMU message:\n" << *msg);
 
     // If we've just reset the filter, then we want to ignore any messages
@@ -866,6 +875,8 @@ namespace RobotLocalization
 
     // Whether we're publishing the acceleration state transform
     nhLocal_.param("publish_acceleration", publishAcceleration_, false);
+
+    nhLocal_.param("publish_filtered_odometry", publishFilteredOdometry_, true);
 
     // Whether we'll allow old measurements to cause a re-publication of the updated state
     nhLocal_.param("permit_corrected_publication", permitCorrectedPublication_, false);
@@ -1752,8 +1763,9 @@ namespace RobotLocalization
 
   template<typename T>
   void RosFilter<T>::odometryCallback(const nav_msgs::Odometry::ConstPtr &msg, const std::string &topicName,
-    const CallbackData &poseCallbackData, const CallbackData &twistCallbackData)
+                                      const CallbackData &poseCallbackData, const CallbackData &twistCallbackData)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // If we've just reset the filter, then we want to ignore any messages
     // that arrive with an older timestamp
     if (msg->header.stamp <= lastSetPoseTime_)
@@ -1813,6 +1825,7 @@ namespace RobotLocalization
                                   const std::string &poseSourceFrame,
                                   const bool imuData)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     const std::string &topicName = callbackData.topicName_;
 
     // If we've just reset the filter, then we want to ignore any messages
@@ -1912,6 +1925,7 @@ namespace RobotLocalization
   template<typename T>
   void RosFilter<T>::periodicUpdate(const ros::TimerEvent& event)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     // Warn the user if the update took too long (> 2 cycles)
     const double loop_elapsed = (event.current_real - event.last_expected).toSec();
     if (loop_elapsed > 2./frequency_)
@@ -2034,7 +2048,7 @@ namespace RobotLocalization
           }
           else
           {
-            ROS_ERROR_STREAM_DELAYED_THROTTLE(5.0, "Could not obtain transform from " << odomFrameId_ <<
+            ROS_ERROR_STREAM_DELAYED_THROTTLE(15.0, "Could not obtain transform from " << odomFrameId_ <<
               "->" << baseLinkFrameId_);
           }
         }
@@ -2046,7 +2060,7 @@ namespace RobotLocalization
       }
 
       // Fire off the position and the transform
-      if (!corrected_data)
+      if (publishFilteredOdometry_ && !corrected_data)
       {
         positionPub_.publish(filteredPosition);
       }
@@ -2054,7 +2068,7 @@ namespace RobotLocalization
       // Retain the last published stamp so we can detect repeated transforms in future cycles
       lastPublishedStamp_ = filteredPosition.header.stamp;
 
-      if (printDiagnostics_)
+      if (publishFilteredOdometry_ && printDiagnostics_)
       {
         freqDiag_->tick();
       }
@@ -2088,6 +2102,7 @@ namespace RobotLocalization
   template<typename T>
   void RosFilter<T>::setPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &msg)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     RF_DEBUG("------ RosFilter::setPoseCallback ------\nPose message:\n" << *msg);
 
     ROS_INFO_STREAM("Received set_pose request with value\n" << *msg);
@@ -2136,9 +2151,10 @@ namespace RobotLocalization
   }
 
   template<typename T>
-  bool RosFilter<T>::setPoseSrvCallback(robot_localization::SetPose::Request& request,
-                          robot_localization::SetPose::Response&)
+  bool RosFilter<T>::setPoseSrvCallback(robot_loc::SetPose::Request& request,
+                          robot_loc::SetPose::Response&)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     geometry_msgs::PoseWithCovarianceStamped::Ptr msg;
     msg = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>(request.pose);
     setPoseCallback(msg);
@@ -2150,6 +2166,7 @@ namespace RobotLocalization
   bool RosFilter<T>::enableFilterSrvCallback(std_srvs::Empty::Request&,
                                              std_srvs::Empty::Response&)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     RF_DEBUG("\n[" << ros::this_node::getName() << ":]" << " ------ /RosFilter::enableFilterSrvCallback ------\n");
     if (enabled_)
     {
@@ -2169,6 +2186,7 @@ namespace RobotLocalization
                                    const CallbackData &callbackData,
                                    const std::string &targetFrame)
   {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
     const std::string &topicName = callbackData.topicName_;
 
     // If we've just reset the filter, then we want to ignore any messages

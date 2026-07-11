@@ -1,0 +1,69 @@
+frequency: 100
+sensor_timeout: 0.2
+two_d_mode: true
+publish_tf: false
+print_diagnostics: true
+debug: false
+debug_out_file: /tmp/gnss_quality_ins_ekf_debug.txt
+
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+
+ins_odom_topic: /localization/ins
+ins_config: [1, 1, 0,
+             0, 0, 1,
+             1, 1, 0,
+             0, 0, 1,
+             0, 0, 0]
+ins_queue_size: 100
+tcp_no_delay: true
+ins_pose_rejection_threshold: 5.0
+ins_twist_rejection_threshold: 3.0
+
+gnss_quality_monitor:
+  enabled: true
+  debug: false
+  publish_debug: true
+  devpvt_topic: /chcnav/devpvt
+  debug_topic: gnss_quality_debug
+  devpvt_timeout: 0.2
+  good_to_degraded_time: 0.5
+  degraded_to_bad_time: 0.3
+  bad_to_degraded_time: 1.0
+  degraded_to_good_time: 2.0
+  stat1_float_bad_duration: 10.0
+  ns2_zero_bad_duration: 1.0
+  min_good_sigma_xy: 0.05
+  min_degraded_sigma_xy: 0.15
+  min_stat1_float_sigma_xy: 0.20
+  min_bad_sigma_xy: 0.50
+  no_data_sigma_xy: 5.0
+  min_good_sigma_yaw_deg: 0.5
+  min_degraded_sigma_yaw_deg: 2.0
+  min_stat1_float_sigma_yaw_deg: 3.0
+  min_bad_sigma_yaw_deg: 10.0
+  no_data_sigma_yaw_deg: 30.0
+  stat1_float_to_degraded_time: 0.3
+  stat1_float_age_bad_time: 0.5
+  no_data_recovery_observe_time: 1.0
+  debug_publish_period: 0.1
+
+use_control: false
+
+process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0.025, 0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0.02, 0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0.01, 0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0.01, 0,
+                           0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0.015]

@@ -13,7 +13,7 @@
 - 上游启动：
   `roslaunch localization_switcher analysis.launch record:=false start_rviz:=false`
 - EKF 启动：
-  `roslaunch robot_localization loc_ekf_ins_imu_wheel.launch test_drop_ins_enabled:=true ...`
+  `roslaunch robot_loc loc_ekf_ins_imu_wheel.launch test_drop_ins_enabled:=true ...`
 - 回放：
   `rosbag play /home/guoli/data/yangpu/lcp/0706/204-ok/223_7_6_* --clock -r 3.0`
 - 记录 topic：

@@ -31,7 +31,7 @@
  */
 
 #include "robot_localization/ros_robot_localization_listener.h"
-#include "robot_localization/GetState.h"
+#include "robot_loc/GetState.h"
 
 #include <string>
 
@@ -56,8 +56,8 @@ private:
   ros::NodeHandle n_;
   ros::ServiceServer service_;
 
-  bool getStateCallback(robot_localization::GetState::Request  &req,
-                        robot_localization::GetState::Response &res)
+  bool getStateCallback(robot_loc::GetState::Request  &req,
+                        robot_loc::GetState::Response &res)
   {
     Eigen::VectorXd state(STATE_SIZE);
     Eigen::MatrixXd covariance(STATE_SIZE, STATE_SIZE);

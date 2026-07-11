@@ -4,7 +4,7 @@
     <!-- 
         Although we test the filter base we need a valid node running which sends the diagnostic messages.
     -->
-    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization" clear_params="true">
+    <node pkg="robot_loc" type="ekf_localization_node" name="ekf_localization" clear_params="true">
         
         <param name="odom0" value="example/odom"/>
         <param name="pose0" value="example/pose"/>
@@ -39,6 +39,6 @@
 
 
     </node>
-    <test test-name="test_filter_base_diagnostics" pkg="robot_localization" type="test_filter_base_diagnostics_timestamps" clear_params="true" time-limit="100.0" />
+    <test test-name="test_filter_base_diagnostics" pkg="robot_loc" type="test_filter_base_diagnostics_timestamps" clear_params="true" time-limit="100.0" />
 
 </launch>

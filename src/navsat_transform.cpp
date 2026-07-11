@@ -67,9 +67,9 @@ namespace RobotLocalization
     transform_timeout_(ros::Duration(0)),
     tf_listener_(tf_buffer_)
   {
-    ROS_INFO("Waiting for valid clock time...");
+    ROS_INFO_THROTTLE(5.0,"Waiting for valid clock time...");
     ros::Time::waitForValid();
-    ROS_INFO("Valid clock time received. Starting node.");
+    ROS_INFO_THROTTLE(5.0,"Valid clock time received. Starting node.");
 
     latest_cartesian_covariance_.resize(POSE_SIZE, POSE_SIZE);
     latest_odom_covariance_.resize(POSE_SIZE, POSE_SIZE);
@@ -157,14 +157,14 @@ namespace RobotLocalization
         FilterUtilities::appendPrefix(tf_prefix, world_frame_id_);
         FilterUtilities::appendPrefix(tf_prefix, base_link_frame_id_);
 
-        robot_localization::SetDatum::Request request;
+        robot_loc::SetDatum::Request request;
         request.geo_pose.position.latitude = datum_lat;
         request.geo_pose.position.longitude = datum_lon;
         request.geo_pose.position.altitude = 0.0;
         tf2::Quaternion quat;
         quat.setRPY(0.0, 0.0, datum_yaw);
         request.geo_pose.orientation = tf2::toMsg(quat);
-        robot_localization::SetDatum::Response response;
+        robot_loc::SetDatum::Response response;
         datumCallback(request, response);
       }
       catch (XmlRpc::XmlRpcException &e)
@@ -339,8 +339,8 @@ namespace RobotLocalization
     }
   }
 
-  bool NavSatTransform::datumCallback(robot_localization::SetDatum::Request& request,
-                                      robot_localization::SetDatum::Response&)
+  bool NavSatTransform::datumCallback(robot_loc::SetDatum::Request& request,
+                                      robot_loc::SetDatum::Response&)
   {
     // If we get a service call with a manual datum, even if we already computed the transform using the robot's
     // initial pose, then we want to assume that we are using a datum from now on, and we want other methods to
@@ -383,8 +383,8 @@ namespace RobotLocalization
     return true;
   }
 
-  bool NavSatTransform::toLLCallback(robot_localization::ToLL::Request& request,
-                                     robot_localization::ToLL::Response& response)
+  bool NavSatTransform::toLLCallback(robot_loc::ToLL::Request& request,
+                                     robot_loc::ToLL::Response& response)
   {
     if (!transform_good_)
     {
@@ -398,8 +398,8 @@ namespace RobotLocalization
     return true;
   }
 
-  bool NavSatTransform::fromLLCallback(robot_localization::FromLL::Request& request,
-                                       robot_localization::FromLL::Response& response)
+  bool NavSatTransform::fromLLCallback(robot_loc::FromLL::Request& request,
+                                       robot_loc::FromLL::Response& response)
   {
     double altitude = request.ll_point.altitude;
     double longitude = request.ll_point.longitude;
@@ -445,8 +445,8 @@ namespace RobotLocalization
     return true;
   }
 
-  bool NavSatTransform::setUTMZoneCallback(robot_localization::SetUTMZone::Request& request,
-                                           robot_localization::SetUTMZone::Response& response)
+  bool NavSatTransform::setUTMZoneCallback(robot_loc::SetUTMZone::Request& request,
+                                           robot_loc::SetUTMZone::Response& response)
   {
     double x_unused;
     double y_unused;
@@ -457,7 +457,7 @@ namespace RobotLocalization
     use_manual_datum_ = false;
     transform_good_ = false;
     has_transform_gps_ = false;
-    ROS_INFO("UTM zone set to %d %s", utm_zone_, northp_ ? "north" : "south");
+    ROS_INFO_THROTTLE(5.0,"UTM zone set to %d %s", utm_zone_, northp_ ? "north" : "south");
 
     return true;
   }
@@ -604,13 +604,13 @@ namespace RobotLocalization
       }
       else
       {
-        ROS_WARN_STREAM_THROTTLE(5.0, "Could not obtain " << world_frame_id_ << "->" << base_link_frame_id_ <<
+        ROS_WARN_STREAM_THROTTLE(15.0, "Could not obtain " << world_frame_id_ << "->" << base_link_frame_id_ <<
           " transform. Will not remove offset of navsat device from robot's origin.");
       }
     }
     else
     {
-      ROS_WARN_STREAM_THROTTLE(5.0, "Could not obtain " << base_link_frame_id_ << "->" << gps_frame_id_ <<
+      ROS_WARN_STREAM_THROTTLE(15.0, "Could not obtain " << base_link_frame_id_ << "->" << gps_frame_id_ <<
         " transform. Will not remove offset of navsat device from robot's origin.");
     }
   }

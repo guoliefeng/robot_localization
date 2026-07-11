@@ -4,3 +4,7 @@ geographiclib:
   ubuntu: [libgeographic-dev]
 yaml-cpp:
   ubuntu: [libyaml-cpp-dev]
+chcnav_msgs:
+  ubuntu: [udx-ads-chcnav-msgs]
+udi_msgs:
+  ubuntu: [unity-drive-udi-msgs]

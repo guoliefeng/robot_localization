@@ -33,10 +33,10 @@
 #ifndef ROBOT_LOCALIZATION_NAVSAT_TRANSFORM_H
 #define ROBOT_LOCALIZATION_NAVSAT_TRANSFORM_H
 
-#include <robot_localization/SetDatum.h>
-#include <robot_localization/ToLL.h>
-#include <robot_localization/FromLL.h>
-#include <robot_localization/SetUTMZone.h>
+#include <robot_loc/SetDatum.h>
+#include <robot_loc/ToLL.h>
+#include <robot_loc/FromLL.h>
+#include <robot_loc/SetUTMZone.h>
 
 #include <ros/ros.h>
 
@@ -83,20 +83,20 @@ class NavSatTransform
 
     //! @brief Callback for the datum service
     //!
-    bool datumCallback(robot_localization::SetDatum::Request& request, robot_localization::SetDatum::Response&);
+    bool datumCallback(robot_loc::SetDatum::Request& request, robot_loc::SetDatum::Response&);
 
     //! @brief Callback for the to Lat Long service
     //!
-    bool toLLCallback(robot_localization::ToLL::Request& request, robot_localization::ToLL::Response& response);
+    bool toLLCallback(robot_loc::ToLL::Request& request, robot_loc::ToLL::Response& response);
 
     //! @brief Callback for the from Lat Long service
     //!
-    bool fromLLCallback(robot_localization::FromLL::Request& request, robot_localization::FromLL::Response& response);
+    bool fromLLCallback(robot_loc::FromLL::Request& request, robot_loc::FromLL::Response& response);
 
     //! @brief Callback for the UTM zone service
     //!
-    bool setUTMZoneCallback(robot_localization::SetUTMZone::Request& request,
-                            robot_localization::SetUTMZone::Response& response);
+    bool setUTMZoneCallback(robot_loc::SetUTMZone::Request& request,
+                            robot_loc::SetUTMZone::Response& response);
 
     //! @brief Given the pose of the navsat sensor in the cartesian frame, removes the offset from the vehicle's
     //! centroid and returns the cartesian-frame pose of said centroid.

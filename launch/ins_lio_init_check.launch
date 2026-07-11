@@ -1,11 +1,11 @@
 <launch>
   <arg name="use_sim_time" default="false" />
   <arg name="set_use_sim_time" default="true" />
-  <arg name="ekf_config" default="$(find robot_localization)/params/ins_lio_init_check.yaml" />
+  <arg name="ekf_config" default="$(find robot_loc)/params/ins_lio_init_check.yaml" />
 
   <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
-  <node pkg="robot_localization"
+  <node pkg="robot_loc"
         type="ekf_localization_node"
         name="ins_lio_init_check"
         output="screen"

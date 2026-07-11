@@ -2,7 +2,7 @@
 
 <launch>
 
-    <node name="test_estimator" pkg="robot_localization" type="test_ros_robot_localization_listener_publisher" clear_params="true">
+    <node name="test_estimator" pkg="robot_loc" type="test_ros_robot_localization_listener_publisher" clear_params="true">
       <param name="frequency" value="30"/>
 
       <param name="sensor_timeout" value="0.1"/>
@@ -61,7 +61,7 @@
                                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01]</rosparam>
     </node>
 
-    <test test-name="test_ros_robot_localization_listener" pkg="robot_localization" type="test_ros_robot_localization_listener" clear_params="true" time-limit="100.0">
+    <test test-name="test_ros_robot_localization_listener" pkg="robot_loc" type="test_ros_robot_localization_listener" clear_params="true" time-limit="100.0">
       <remap from="robot_localization" to="test_estimator" />
     </test>
 
