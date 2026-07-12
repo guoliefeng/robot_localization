@@ -220,12 +220,16 @@ public:
       ekf_(nh_, nh_priv_, "loc_ekf_node"),
       state_timeout_sec_(1.0),
       ins_pose_cb_data_(makeCallbackData("ins_pose", makePoseUpdateVector(), 5.0)),
-      ins_twist_cb_data_(makeCallbackData("ins_twist", makeTwistUpdateVector(), 3.0)),
+      ins_twist_cb_data_(makeCallbackData("ins_twist", makeEmptyUpdateVector(), 3.0)),
       fusion_pose_cb_data_(makeCallbackData("fusion_pose", makePoseUpdateVector(), 3.0)),
       fusion_twist_cb_data_(makeCallbackData("fusion_twist", makeTwistUpdateVector(), 3.0))
   {
     loadParams();
     configureCallbackData();
+
+    ROS_INFO_STREAM("INS pose fusion: enabled");
+    ROS_INFO_STREAM(
+      "INS twist fusion: " << (fuse_ins_twist_ ? "enabled" : "disabled"));
 
     ekf_.initialize();
 
@@ -270,6 +274,7 @@ private:
     nh_priv_.param("state_timeout_sec", state_timeout_sec_, 1.0);
     nh_priv_.param("ins_pose_rejection_threshold", ins_pose_rejection_threshold_, 5.0);
     nh_priv_.param("ins_twist_rejection_threshold", ins_twist_rejection_threshold_, 3.0);
+    nh_priv_.param("fuse_ins_twist", fuse_ins_twist_, false);
     nh_priv_.param("fusion_pose_rejection_threshold", fusion_pose_rejection_threshold_, 3.0);
     nh_priv_.param("fusion_twist_rejection_threshold", fusion_twist_rejection_threshold_, 3.0);
     nh_priv_.param(
@@ -298,20 +303,24 @@ private:
   void configureCallbackData()
   {
     const std::vector<int> pose_update_vector = makePoseUpdateVector();
-    const std::vector<int> twist_update_vector = makeTwistUpdateVector();
+    const std::vector<int> fusion_twist_update_vector = makeTwistUpdateVector();
+    const std::vector<int> ins_twist_update_vector =
+      fuse_ins_twist_ ? makeTwistUpdateVector() : makeEmptyUpdateVector();
 
     ins_pose_cb_data_ =
       makeCallbackData("ins_pose", pose_update_vector, ins_pose_rejection_threshold_);
     ins_twist_cb_data_ =
-      makeCallbackData("ins_twist", twist_update_vector, ins_twist_rejection_threshold_);
+      makeCallbackData("ins_twist", ins_twist_update_vector, ins_twist_rejection_threshold_);
     fusion_pose_cb_data_ =
       makeCallbackData("fusion_pose", pose_update_vector, fusion_pose_rejection_threshold_);
     fusion_twist_cb_data_ =
-      makeCallbackData("fusion_twist", twist_update_vector, fusion_twist_rejection_threshold_);
+      makeCallbackData("fusion_twist", fusion_twist_update_vector, fusion_twist_rejection_threshold_);
   }
 
   void normalizeOdomFrame(nav_msgs::Odometry &odom) const
   {
+    // This only normalizes frame labels; it does not transform twist values.
+    // INS twist is disabled by default, isolating it from this known frame risk.
     odom.header.frame_id = frame_id_;
     odom.child_frame_id = child_frame_id_;
   }
@@ -833,6 +842,7 @@ private:
   mutable std::mutex state_mtx_;
   LocDecision loc_decision_;
   bool absolute_pose_initialized_ = false;
+  bool fuse_ins_twist_ = false;
 
   std::string ins_topic_;
   std::string fusion_topic_;

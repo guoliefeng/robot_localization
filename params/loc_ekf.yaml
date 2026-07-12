@@ -1,6 +1,7 @@
 frequency: 100
+localization_estimate_frequency: 28
 sensor_timeout: 0.2
-predict_to_current_time: true
+predict_to_current_time: false
 reset_on_time_jump: true
 two_d_mode: true
 publish_tf: false
@@ -28,6 +29,11 @@ debug_out_file: /tmp/yangpu_loc_ekf_debug.txt
 # 切至 SECONDARY + USE_GNSS 时，EKF 可能已与 INS 相差数米；提高门限以接收
 # switcher 已判定为可信的 INS 绝对位姿并完成回归。LIO 在该策略下会被直接 drop。
 ins_pose_rejection_threshold: 30.0
+
+# 当前 /localization/ins 的 twist 未提供有效速度，长期为 0。
+# 禁止将该零值作为真实速度观测送入 EKF；速度由连续 pose 观测和
+# 位置—速度状态协方差耦合估计。仅在上游提供可靠 twist 后人工开启。
+fuse_ins_twist: false
 
 map_frame: map
 odom_frame: odom
@@ -89,14 +95,14 @@ deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # 这里先使用较保守的默认模板量级。
 # 后续如果 final_odom 响应慢，可以适当增大 vx/vy/vyaw 的 process noise；
 # 如果 final_odom 太抖，可以适当减小 vx/vy/vyaw 的 process noise。
-process_noise_covariance: [0.50, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0.50, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0,    0,    0,    0,    0,    0.25,  0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0,    0,    0,    0,    0,    0,     0.25,  0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0.025,  0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0.025,  0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,

@@ -1,8 +1,10 @@
 <launch>
-  <arg name="use_sim_time" default="false" />
+  <arg name="use_sim_time" default="true" />
   <arg name="set_use_sim_time" default="true" />
   <arg name="ekf_config" default="$(find robot_loc)/params/ins_only_init_check.yaml" />
-
+    <arg name="output_dir" default="/home/guoli/data/yangpu/0712/test" />
+  <arg name="output_prefix" default="$(arg output_dir)/227" />
+  <arg name="record" default="true" />
   <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
   <node pkg="robot_loc"
@@ -11,6 +13,33 @@
         output="screen"
         clear_params="true">
     <rosparam command="load" file="$(arg ekf_config)" />
-    <remap from="odometry/filtered" to="/localization/final_odom" />
+    <remap from="odometry/filtered" to="/localization/final_odom1" />
   </node>
+
+  
+  <node pkg="rosbag" type="record" name="rosbag_record_yangpu_analysis" output="log"
+        if="$(arg record)"
+        args="-o $(arg output_prefix)
+              /clock
+              /lio_loc_result
+              /localization/status
+              /localization/lost_test
+              /localization/loc_status
+              /localization/ins
+              /udi_zpmc_loc_ns/loc_result_SEMANTIC_VOXELMAP
+              /udi_zpmc_loc_ns/ins_odom_huace
+              /wheel_odom
+              /wheel_imu_odom
+              /chcnav/devpvt
+              /ins_driver/imu
+              /localization/loc_policy_code
+              /localization/abnormal_code_array
+               /localization_switcher/error
+              /localization/status/text
+              /localization/policy/text
+              /localization/abnormal_code/text
+              /localization_switcher/fusion_loc/jump_distance
+              /localization_switcher/fusion_loc/fake_gnss 
+              /localization/final_odom1
+              /lio_loc_result" />
 </launch>
