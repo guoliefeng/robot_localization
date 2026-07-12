@@ -209,6 +209,14 @@ template<class T> class RosFilter
     //!
     bool getFilteredAccelMessage(geometry_msgs::AccelWithCovarianceStamped &message);
 
+    //! Process all queued measurements and atomically snapshot the resulting state.
+    //! Wrappers that own their publish loop use this instead of a second, phase-
+    //! shifted timer reading the filter state.
+    bool processMeasurementsAndGetState(
+      const ros::Time &currentTime,
+      nav_msgs::Odometry &odometry,
+      geometry_msgs::AccelWithCovarianceStamped *acceleration = nullptr);
+
     //! @brief Callback method for receiving all IMU messages
     //! @param[in] msg - The ROS IMU message to take in.
     //! @param[in] topicName - The topic name for the IMU message (only used for debug output)

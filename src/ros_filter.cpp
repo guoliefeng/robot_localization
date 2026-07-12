@@ -144,8 +144,12 @@ namespace RobotLocalization
         0.1,
         10));
 
-    // Publisher
-    positionPub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 20);
+    // A wrapper may own publication (e.g. to publish multiple output message
+    // types from one atomic state snapshot).
+    if (publishFilteredOdometry_)
+    {
+      positionPub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 20);
+    }
 
     // Optional acceleration publisher
     if (publishAcceleration_)
@@ -155,7 +159,17 @@ namespace RobotLocalization
 
     lastDiagTime_ = ros::Time::now();
 
-    periodicUpdateTimer_ = nh_.createTimer(ros::Duration(1./frequency_), &RosFilter<T>::periodicUpdate, this);
+    bool internalPeriodicUpdate = true;
+    nhLocal_.param("internal_periodic_update", internalPeriodicUpdate, true);
+    if (internalPeriodicUpdate)
+    {
+      periodicUpdateTimer_ =
+        nh_.createTimer(ros::Duration(1./frequency_), &RosFilter<T>::periodicUpdate, this);
+    }
+    else
+    {
+      ROS_INFO("Internal filter timer disabled; wrapper owns the update/publish loop.");
+    }
   }
 
   template<typename T>
@@ -484,6 +498,69 @@ namespace RobotLocalization
     }
 
     return filter_.getInitializedStatus();
+  }
+
+  template<typename T>
+  bool RosFilter<T>::processMeasurementsAndGetState(
+    const ros::Time &currentTime,
+    nav_msgs::Odometry &odometry,
+    geometry_msgs::AccelWithCovarianceStamped *acceleration)
+  {
+    std::lock_guard<std::recursive_mutex> lock(filterMutex_);
+
+    if (!enabled_)
+    {
+      ROS_INFO_STREAM_ONCE(
+        "Filter is disabled. To enable it call the " << enableFilterSrv_.getService() << " service");
+      return false;
+    }
+
+    if (toggledOn_)
+    {
+      integrateMeasurements(currentTime);
+      differentiateMeasurements(currentTime);
+    }
+    else
+    {
+      clearMeasurementQueue();
+      if (filter_.getInitializedStatus())
+      {
+        filter_.setLastMeasurementTime(currentTime.toSec());
+      }
+    }
+
+    if (!getFilteredOdometryMessage(odometry))
+    {
+      return false;
+    }
+    if (!validateFilterOutput(odometry))
+    {
+      ROS_ERROR_STREAM_THROTTLE(1.0, "Invalid filtered odometry; suppressing output.");
+      return false;
+    }
+
+    if (acceleration != nullptr)
+    {
+      getFilteredAccelMessage(*acceleration);
+    }
+
+    if (printDiagnostics_)
+    {
+      freqDiag_->tick();
+      const double diagnosticDuration = (currentTime - lastDiagTime_).toSec();
+      if (diagnosticDuration >= diagnosticUpdater_.getPeriod() || diagnosticDuration < 0.0)
+      {
+        diagnosticUpdater_.force_update();
+        lastDiagTime_ = currentTime;
+      }
+    }
+
+    if (smoothLaggedData_)
+    {
+      clearExpiredHistory(filter_.getLastMeasurementTime() - historyLength_);
+    }
+
+    return true;
   }
 
   template<typename T>
@@ -1068,14 +1145,20 @@ namespace RobotLocalization
              "\nprint_diagnostics is " << std::boolalpha << printDiagnostics_ <<
              "\nsuppress tf warnings is " << std::boolalpha << tfSilentFailure_ << "\n" "\n");
 
-    // Create a subscriber for manually setting/resetting pose
-    setPoseSub_ = nh_.subscribe("set_pose",
-                                1,
-                                &RosFilter<T>::setPoseCallback,
-                                this, ros::TransportHints().tcpNoDelay(false));
-
-    // Create a service for manually setting/resetting pose
-    setPoseSrv_ = nh_.advertiseService("set_pose", &RosFilter<T>::setPoseSrvCallback, this);
+    bool enableSetPoseInterface = true;
+    nhLocal_.param("enable_set_pose_interface", enableSetPoseInterface, true);
+    if (enableSetPoseInterface)
+    {
+      setPoseSub_ = nh_.subscribe("set_pose",
+                                  1,
+                                  &RosFilter<T>::setPoseCallback,
+                                  this, ros::TransportHints().tcpNoDelay(false));
+      setPoseSrv_ = nh_.advertiseService("set_pose", &RosFilter<T>::setPoseSrvCallback, this);
+    }
+    else
+    {
+      ROS_INFO("External set_pose topic/service disabled for this filter instance.");
+    }
 
     // Create a service for manually enabling the filter
     enableFilterSrv_ = nhLocal_.advertiseService("enable", &RosFilter<T>::enableFilterSrvCallback, this);
@@ -2145,7 +2228,8 @@ namespace RobotLocalization
     filter_.setState(measurement);
     filter_.setEstimateErrorCovariance(measurementCovariance);
 
-    filter_.setLastMeasurementTime(ros::Time::now().toSec());
+    const ros::Time stateTime = msg->header.stamp.isZero() ? ros::Time::now() : msg->header.stamp;
+    filter_.setLastMeasurementTime(stateTime.toSec());
 
     RF_DEBUG("\n------ /RosFilter::setPoseCallback ------\n");
   }

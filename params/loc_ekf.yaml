@@ -1,8 +1,27 @@
 frequency: 100
 sensor_timeout: 0.2
+predict_to_current_time: true
+reset_on_time_jump: true
 two_d_mode: true
 publish_tf: false
 print_diagnostics: true
+internal_periodic_update: false
+enable_set_pose_interface: false
+
+# Low-latency I/O. Small queues discard old work quickly during short CPU
+# pressure instead of allowing final_odom to build a visible backlog.
+input_queue_size: 5
+output_queue_size: 5
+max_input_age_sec: 0.5
+max_future_stamp_sec: 0.05
+hard_stale_warn_sec: 1.0
+
+# LIO PRIMARY response tuning. Keep these parameters measurable and tunable;
+# lowering them further can trade phase response for jitter/rejection.
+fusion_primary_xy_variance: 0.0005
+fusion_primary_vxy_variance: 0.005
+fusion_primary_yaw_std_deg: 0.5
+fusion_primary_vyaw_std_deg: 0.5
 debug: false
 debug_out_file: /tmp/yangpu_loc_ekf_debug.txt
 
@@ -70,14 +89,14 @@ deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # 这里先使用较保守的默认模板量级。
 # 后续如果 final_odom 响应慢，可以适当增大 vx/vy/vyaw 的 process noise；
 # 如果 final_odom 太抖，可以适当减小 vx/vy/vyaw 的 process noise。
-process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+process_noise_covariance: [0.50, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0.50, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0,    0,    0,    0,    0,    0.025, 0,     0,    0,    0,    0,    0,    0,    0,
-                           0,    0,    0,    0,    0,    0,    0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0.25,  0,     0,    0,    0,    0,    0,    0,    0,
+                           0,    0,    0,    0,    0,    0,    0,     0.25,  0,    0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
                            0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,

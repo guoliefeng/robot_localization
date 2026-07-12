@@ -3,6 +3,8 @@
   <arg name="set_use_sim_time" default="false" />
   <arg name="ekf_config" default="$(find robot_loc)/params/loc_ekf.yaml" />
   <arg name="filtered_odom_topic" default="/localization/final_odom" />
+  <arg name="input_queue_size" default="5" />
+  <arg name="output_queue_size" default="5" />
 
   <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
 
@@ -18,6 +20,11 @@
     <param name="localization_status_topic" value="/localization/status" />
     <param name="loc_policy_topic" value="/localization/loc_policy_code" />
     <param name="publish_filtered_odometry" value="false" />
+    <param name="internal_periodic_update" value="false" />
+    <param name="enable_set_pose_interface" value="false" />
+    <param name="predict_to_current_time" value="true" />
+    <param name="input_queue_size" value="$(arg input_queue_size)" />
+    <param name="output_queue_size" value="$(arg output_queue_size)" />
 
     <param name="frame_id" value="map" />
     <param name="child_frame_id" value="base_link" />

@@ -14,7 +14,9 @@
 #include <tf2/utils.h>
 #include <udi_msgs/LocalizationEstimate.h>
 
+#include <atomic>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -126,6 +128,15 @@ bool isValidAbsolutePose(const nav_msgs::Odometry &odom)
          quaternion_norm_squared > 1e-12;
 }
 
+bool isFiniteOdometry(const nav_msgs::Odometry &odom)
+{
+  const geometry_msgs::Vector3 &linear = odom.twist.twist.linear;
+  const geometry_msgs::Vector3 &angular = odom.twist.twist.angular;
+  return isValidAbsolutePose(odom) &&
+         std::isfinite(linear.x) && std::isfinite(linear.y) && std::isfinite(linear.z) &&
+         std::isfinite(angular.x) && std::isfinite(angular.y) && std::isfinite(angular.z);
+}
+
 void clearCovariances(nav_msgs::Odometry &odom)
 {
   std::fill(odom.pose.covariance.begin(), odom.pose.covariance.end(), 0.0);
@@ -219,18 +230,24 @@ public:
     ekf_.initialize();
 
     localization_estimate_pub_ =
-      nh_.advertise<udi_msgs::LocalizationEstimate>(localization_estimate_topic_, 10);
-    filtered_odom_pub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 100);
+      nh_.advertise<udi_msgs::LocalizationEstimate>(
+        localization_estimate_topic_, output_queue_size_);
+    filtered_odom_pub_ =
+      nh_.advertise<nav_msgs::Odometry>("odometry/filtered", output_queue_size_);
     localization_estimate_timer_ = nh_.createTimer(
       ros::Duration(1.0 / localization_estimate_frequency_),
       &LocEkfNode::publishLocalizationEstimate,
       this);
 
-    ins_sub_ = nh_.subscribe(ins_topic_, 100, &LocEkfNode::insCb, this);
-    fusion_sub_ = nh_.subscribe(fusion_topic_, 100, &LocEkfNode::fusionCb, this);
+    const ros::TransportHints low_latency_hints = ros::TransportHints().tcpNoDelay(true);
+    ins_sub_ = nh_.subscribe(
+      ins_topic_, input_queue_size_, &LocEkfNode::insCb, this, low_latency_hints);
+    fusion_sub_ = nh_.subscribe(
+      fusion_topic_, input_queue_size_, &LocEkfNode::fusionCb, this, low_latency_hints);
     localization_status_sub_ = nh_.subscribe(
-      localization_status_topic_, 10, &LocEkfNode::localizationStatusCb, this);
-    loc_policy_sub_ = nh_.subscribe(loc_policy_topic_, 10, &LocEkfNode::locPolicyCb, this);
+      localization_status_topic_, 5, &LocEkfNode::localizationStatusCb, this, low_latency_hints);
+    loc_policy_sub_ = nh_.subscribe(
+      loc_policy_topic_, 5, &LocEkfNode::locPolicyCb, this, low_latency_hints);
   }
 
 private:
@@ -260,6 +277,17 @@ private:
       std::string("/localization_estimate1"));
     nh_priv_.param(
       "localization_estimate_frequency", localization_estimate_frequency_, 100.0);
+    nh_priv_.param("input_queue_size", input_queue_size_, 5);
+    nh_priv_.param("output_queue_size", output_queue_size_, 5);
+    nh_priv_.param("max_input_age_sec", max_input_age_sec_, 0.5);
+    nh_priv_.param("max_future_stamp_sec", max_future_stamp_sec_, 0.05);
+    nh_priv_.param("hard_stale_warn_sec", hard_stale_warn_sec_, 1.0);
+    nh_priv_.param("fusion_primary_xy_variance", fusion_primary_xy_variance_, 0.0005);
+    nh_priv_.param("fusion_primary_vxy_variance", fusion_primary_vxy_variance_, 0.005);
+    nh_priv_.param("fusion_primary_yaw_std_deg", fusion_primary_yaw_std_deg_, 0.5);
+    nh_priv_.param("fusion_primary_vyaw_std_deg", fusion_primary_vyaw_std_deg_, 0.5);
+    input_queue_size_ = std::max(1, input_queue_size_);
+    output_queue_size_ = std::max(1, output_queue_size_);
     if (localization_estimate_frequency_ <= 0.0)
     {
       ROS_WARN("localization_estimate_frequency must be positive; using 100 Hz");
@@ -286,6 +314,39 @@ private:
   {
     odom.header.frame_id = frame_id_;
     odom.child_frame_id = child_frame_id_;
+  }
+
+  bool validateInput(
+    const nav_msgs::Odometry &odom,
+    const char *source_name,
+    std::atomic<uint64_t> &invalid_count,
+    std::atomic<uint64_t> &stale_count,
+    std::atomic<double> &last_age_sec) const
+  {
+    if (!isFiniteOdometry(odom))
+    {
+      ++invalid_count;
+      ROS_WARN_STREAM_THROTTLE(1.0, "Dropping invalid " << source_name << " odometry");
+      return false;
+    }
+
+    const double age_sec = (ros::Time::now() - odom.header.stamp).toSec();
+    last_age_sec.store(age_sec, std::memory_order_relaxed);
+    if (age_sec > max_input_age_sec_)
+    {
+      ++stale_count;
+      ROS_WARN_STREAM_THROTTLE(
+        1.0, "Dropping stale " << source_name << ": age=" << age_sec << " s");
+      return false;
+    }
+    if (age_sec < -max_future_stamp_sec_)
+    {
+      ++invalid_count;
+      ROS_WARN_STREAM_THROTTLE(
+        1.0, "Dropping future-dated " << source_name << ": age=" << age_sec << " s");
+      return false;
+    }
+    return true;
   }
 
   bool initializeFromAbsolutePose(
@@ -441,8 +502,12 @@ private:
     switch (mode)
     {
       case SourceMode::PRIMARY:
-        setPoseCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
-        setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(1.0), 2.0));
+        setPoseCov(
+          odom, fusion_primary_xy_variance_, 100.0, 100.0,
+          std::pow(deg2rad(fusion_primary_yaw_std_deg_), 2.0));
+        setTwistCov(
+          odom, fusion_primary_vxy_variance_, 100.0, 100.0,
+          std::pow(deg2rad(fusion_primary_vyaw_std_deg_), 2.0));
         break;
       case SourceMode::WEAK:
         setPoseCov(odom, 10.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
@@ -488,6 +553,12 @@ private:
 
   void insCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
+    if (!msg || !validateInput(
+        *msg, "INS", ins_invalid_count_, ins_stale_count_, last_ins_age_sec_))
+    {
+      return;
+    }
+    last_ins_accepted_stamp_sec_.store(msg->header.stamp.toSec(), std::memory_order_relaxed);
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
 
@@ -526,6 +597,12 @@ private:
 
   void fusionCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
+    if (!msg || !validateInput(
+        *msg, "LIO", fusion_invalid_count_, fusion_stale_count_, last_fusion_age_sec_))
+    {
+      return;
+    }
+    last_fusion_accepted_stamp_sec_.store(msg->header.stamp.toSec(), std::memory_order_relaxed);
     nav_msgs::OdometryPtr out(new nav_msgs::Odometry(*msg));
     normalizeOdomFrame(*out);
 
@@ -578,14 +655,30 @@ private:
 
   void publishLocalizationEstimate(const ros::TimerEvent &)
   {
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    const ros::Time cycle_time = ros::Time::now();
+    if (!last_cycle_time_.isZero() && cycle_time < last_cycle_time_)
+    {
+      // rosbag loops and repeated simulated-time tests legitimately jump back.
+      // RosFilter resets its history; reset the wrapper's monotonic guard too.
+      last_output_stamp_ = ros::Time();
+    }
+    last_cycle_time_ = cycle_time;
     nav_msgs::Odometry odom;
-    if (!ekf_.getFilteredOdometryMessage(odom))
+    geometry_msgs::AccelWithCovarianceStamped acceleration;
+    if (!ekf_.processMeasurementsAndGetState(cycle_time, odom, &acceleration))
     {
       return;
     }
 
-    geometry_msgs::AccelWithCovarianceStamped acceleration;
-    const bool has_acceleration = ekf_.getFilteredAccelMessage(acceleration);
+    if (!last_output_stamp_.isZero() && odom.header.stamp < last_output_stamp_)
+    {
+      ++output_regression_count_;
+      ROS_ERROR_STREAM_THROTTLE(1.0, "Suppressing time-regressing final_odom");
+      return;
+    }
+    last_output_stamp_ = odom.header.stamp;
+    const bool has_acceleration = true;
     double yaw = 0.0;
     double pitch = 0.0;
     double roll = 0.0;
@@ -602,7 +695,7 @@ private:
     const double vy_map = sin_yaw * vx_vrf + cos_yaw * vy_vrf;
 
     udi_msgs::LocalizationEstimate estimate;
-    estimate.header.timestamp_sec = ros::Time::now().toSec();
+    estimate.header.timestamp_sec = odom.header.stamp.toSec();
     estimate.header.sequence_num = localization_estimate_sequence_++;
     estimate.header.frame_id = odom.header.frame_id;
 
@@ -672,6 +765,40 @@ private:
     }
 
     localization_estimate_pub_.publish(estimate);
+
+    ++output_count_;
+    const double execution_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - start).count();
+    last_execution_ms_.store(execution_ms, std::memory_order_relaxed);
+    if (execution_ms > 1000.0 / localization_estimate_frequency_)
+    {
+      ++loop_overrun_count_;
+    }
+    logRuntimeStatus(cycle_time, odom);
+  }
+
+  void logRuntimeStatus(const ros::Time &now, const nav_msgs::Odometry &odom)
+  {
+    const double ins_stamp = last_ins_accepted_stamp_sec_.load(std::memory_order_relaxed);
+    const double fusion_stamp = last_fusion_accepted_stamp_sec_.load(std::memory_order_relaxed);
+    const double newest_stamp = std::max(ins_stamp, fusion_stamp);
+    const double accepted_age = newest_stamp > 0.0 ? now.toSec() - newest_stamp : -1.0;
+    if (accepted_age > hard_stale_warn_sec_)
+    {
+      ROS_ERROR_STREAM_THROTTLE(
+        1.0, "All accepted final_odom inputs are hard-stale: age=" << accepted_age << " s");
+    }
+
+    ROS_INFO_STREAM_THROTTLE(
+      1.0, "final_odom runtime: output_age=" << (now - odom.header.stamp).toSec()
+        << " ins_age=" << last_ins_age_sec_.load(std::memory_order_relaxed)
+        << " lio_age=" << last_fusion_age_sec_.load(std::memory_order_relaxed)
+        << " loop_ms=" << last_execution_ms_.load(std::memory_order_relaxed)
+        << " outputs=" << output_count_.load()
+        << " overruns=" << loop_overrun_count_.load()
+        << " stamp_regressions=" << output_regression_count_.load()
+        << " ins_invalid/stale=" << ins_invalid_count_.load() << "/" << ins_stale_count_.load()
+        << " lio_invalid/stale=" << fusion_invalid_count_.load() << "/" << fusion_stale_count_.load());
   }
 
   void logStatus(
@@ -717,6 +844,15 @@ private:
 
   double state_timeout_sec_;
   double localization_estimate_frequency_ = 100.0;
+  int input_queue_size_ = 5;
+  int output_queue_size_ = 5;
+  double max_input_age_sec_ = 0.5;
+  double max_future_stamp_sec_ = 0.05;
+  double hard_stale_warn_sec_ = 1.0;
+  double fusion_primary_xy_variance_ = 0.0005;
+  double fusion_primary_vxy_variance_ = 0.005;
+  double fusion_primary_yaw_std_deg_ = 0.5;
+  double fusion_primary_vyaw_std_deg_ = 0.5;
   double ins_pose_rejection_threshold_ = 5.0;
   double ins_twist_rejection_threshold_ = 3.0;
   double fusion_pose_rejection_threshold_ = 3.0;
@@ -727,10 +863,24 @@ private:
   RobotLocalization::CallbackData fusion_pose_cb_data_;
   RobotLocalization::CallbackData fusion_twist_cb_data_;
 
-  uint64_t ins_count_ = 0;
-  uint64_t ins_drop_count_ = 0;
-  uint64_t fusion_count_ = 0;
-  uint64_t fusion_drop_count_ = 0;
+  std::atomic<uint64_t> ins_count_{0};
+  std::atomic<uint64_t> ins_drop_count_{0};
+  std::atomic<uint64_t> fusion_count_{0};
+  std::atomic<uint64_t> fusion_drop_count_{0};
+  std::atomic<uint64_t> ins_invalid_count_{0};
+  std::atomic<uint64_t> ins_stale_count_{0};
+  std::atomic<uint64_t> fusion_invalid_count_{0};
+  std::atomic<uint64_t> fusion_stale_count_{0};
+  std::atomic<uint64_t> output_count_{0};
+  std::atomic<uint64_t> loop_overrun_count_{0};
+  std::atomic<uint64_t> output_regression_count_{0};
+  std::atomic<double> last_ins_age_sec_{-1.0};
+  std::atomic<double> last_fusion_age_sec_{-1.0};
+  std::atomic<double> last_ins_accepted_stamp_sec_{0.0};
+  std::atomic<double> last_fusion_accepted_stamp_sec_{0.0};
+  std::atomic<double> last_execution_ms_{0.0};
+  ros::Time last_output_stamp_;
+  ros::Time last_cycle_time_;
   uint32_t localization_estimate_sequence_ = 0;
 };
 
