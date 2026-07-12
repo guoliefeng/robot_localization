@@ -1,6 +1,9 @@
+# frequency 是底层 EKF 的配置频率；localization_estimate_frequency 是
+# wrapper 更新并发布状态的定时器频率。二者都不代表传感器的真实测量频率。
 frequency: 100
 localization_estimate_frequency: 28
 sensor_timeout: 0.2
+# run.launch 当前会用同名 <param> 覆盖此值，现场值应通过 rosparam 查询。
 predict_to_current_time: false
 reset_on_time_jump: true
 two_d_mode: true
@@ -17,8 +20,8 @@ max_input_age_sec: 0.5
 max_future_stamp_sec: 0.05
 hard_stale_warn_sec: 1.0
 
-# LIO PRIMARY response tuning. Keep these parameters measurable and tunable;
-# lowering them further can trade phase response for jitter/rejection.
+# LIO PRIMARY 响应参数。以下 covariance 数值均为 variance，不是标准差；
+# 继续减小可能改善响应，也可能增加抖动或 Mahalanobis 拒绝概率。
 fusion_primary_xy_variance: 0.0005
 fusion_primary_vxy_variance: 0.005
 fusion_primary_yaw_std_deg: 0.5
@@ -26,6 +29,7 @@ fusion_primary_vyaw_std_deg: 0.5
 debug: false
 debug_out_file: /tmp/yangpu_loc_ekf_debug.txt
 
+# rejection threshold 是 Mahalanobis 距离门限，不是普通的米或弧度误差。
 # 切至 SECONDARY + USE_GNSS 时，EKF 可能已与 INS 相差数米；提高门限以接收
 # switcher 已判定为可信的 INS 绝对位姿并完成回归。LIO 在该策略下会被直接 drop。
 ins_pose_rejection_threshold: 30.0
@@ -33,6 +37,7 @@ ins_pose_rejection_threshold: 30.0
 # 当前 /localization/ins 的 twist 未提供有效速度，长期为 0。
 # 禁止将该零值作为真实速度观测送入 EKF；速度由连续 pose 观测和
 # 位置—速度状态协方差耦合估计。仅在上游提供可靠 twist 后人工开启。
+# 关闭原因是字段无效，并不表示车辆静止时的零速度观测必然无效。
 fuse_ins_twist: false
 
 map_frame: map
@@ -65,7 +70,8 @@ control_timeout: 0.2
 
 # vx, vy, vz, vroll, vpitch, vyaw
 # 当前只写入已知车辆前向 vx 加/减速度先验。
-# 若后续不使用 control，这些参数不会直接影响测量融合。
+# use_control=false 时，control_config、control_timeout 和以下加减速限制
+# 都不会参与预测，也不会直接影响测量融合。
 control_config: [true, false, false, false, false, false]
 
 # 已知车辆前向最大加速度约 2.0 m/s^2。
@@ -92,6 +98,7 @@ deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # vroll, vpitch, vyaw,
 # ax, ay, az
 #
+# Q 是状态转移过程噪声 covariance，不是传感器 measurement noise。
 # 这里先使用较保守的默认模板量级。
 # 后续如果 final_odom 响应慢，可以适当增大 vx/vy/vyaw 的 process noise；
 # 如果 final_odom 太抖，可以适当减小 vx/vy/vyaw 的 process noise。

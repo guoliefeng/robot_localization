@@ -3,6 +3,38 @@
  * All rights reserved.
  */
 
+/*
+ * 模块功能：
+ *
+ * 本节点是在 robot_localization::RosEkf 外部增加的一层定位数据管理封装。
+ * 节点本身不重新实现 EKF 的预测方程和观测更新方程，而是负责：
+ *
+ * 1. 接收 INS 和 LIO 输出的 nav_msgs::Odometry；
+ * 2. 检查输入时间戳、位置、姿态和速度字段是否合法；
+ * 3. 根据 localization status 和 localization policy 决定当前参与融合的数据源；
+ * 4. 根据 PRIMARY、DEGRADED、WEAK 等模式设置观测协方差；
+ * 5. 将选中的 pose/twist 观测送入 robot_localization EKF；
+ * 6. 定时读取 EKF 状态并输出 final_odom 和 LocalizationEstimate。
+ *
+ * 当前节点属于单 EKF 全局定位融合结构：
+ *
+ *   INS/LIO 绝对位姿
+ *          ↓
+ *   状态与策略选源
+ *          ↓
+ *   设置观测协方差
+ *          ↓
+ *   robot_localization EKF
+ *          ↓
+ *   final_odom
+ *
+ * 注意：
+ * - 当前 INS 只保证 pose 有效，INS twist 长期为零，因此默认禁止融合；
+ * - LIO pose 和 LIO twist 当前仍可同时参与融合；
+ * - frame 标签归一化不等同于真正的 TF 坐标变换；
+ * - 本节点输出位于 map 世界坐标系，定位源切换时可能受到绝对位姿差异影响。
+ */
+
 #include "robot_localization/filter_common.h"
 #include "robot_localization/ros_filter_types.h"
 
@@ -28,33 +60,42 @@
 namespace
 {
 
+// localization_switcher 输出的定位健康状态。
+// 该状态用于描述当前主定位结果是否正常、降级、丢失或处于备用源状态。
+// 它不直接等价于某一个具体传感器是否有消息。
 enum class LocalizationStatus : unsigned int
 {
-  NORMAL = 0x00,
-  DR = 0x01,
-  LOST = 0x02,
-  NOT_STABLE = 0x04,
-  SECONDARY = 0x08
+  NORMAL = 0x00,      // 当前定位结果正常
+  DR = 0x01,          // 当前处于航位推算或无绝对位姿校正状态
+  LOST = 0x02,        // 当前没有可信定位结果
+  NOT_STABLE = 0x04,  // 当前定位源存在异常或尚未稳定
+  SECONDARY = 0x08    // 当前已切换到备用定位源
 };
 
+// localization_switcher 输出的定位策略位掩码。
+// 一个 policy 数值可以同时包含多个标志，因此判断策略时必须使用位运算，
+// 不能将 policy 简单理解为互斥枚举值。
 enum class LocalizationPolicy : unsigned long long
 {
-  NO_LOCALIZATION = 0,
-  USE_LIDAR_LIO = 1,
-  USE_FUSION_ODOM = 2,
-  USE_GNSS = 4,
-  USE_ODOM_VEL_IMU = 8,
-  USE_ODOM_VEL = 16,
-  USE_RELOC_GNSS = 32,
-  USE_RELOC_X = 64
+  NO_LOCALIZATION = 0,  // 当前策略不提供可用定位源
+  USE_LIDAR_LIO = 1,    // 策略包含激光 LIO 标志
+  USE_FUSION_ODOM = 2,  // 策略包含融合里程计标志
+  USE_GNSS = 4,         // 策略包含 GNSS/INS 标志
+  USE_ODOM_VEL_IMU = 8, // 策略包含里程计速度和 IMU 标志
+  USE_ODOM_VEL = 16,    // 策略包含里程计速度标志
+  USE_RELOC_GNSS = 32,  // 策略包含 GNSS 重定位标志
+  USE_RELOC_X = 64      // 策略包含 X 方向重定位标志
 };
 
+// 某一路观测送入 EKF 时采用的可信度模式。
+// 不同模式通过设置不同的观测协方差影响 Kalman 增益。
+// DROP 表示该数据源当前不进入 EKF measurement queue。
 enum class SourceMode
 {
-  PRIMARY,
-  WEAK,
-  DEGRADED,
-  DROP
+  PRIMARY,   // 当前主观测源，使用较小观测方差
+  WEAK,      // 弱约束观测源，只对状态提供较轻微修正
+  DEGRADED,  // 质量下降但仍允许参与融合
+  DROP       // 当前完全不使用该观测源
 };
 
 double deg2rad(const double deg)
@@ -62,11 +103,16 @@ double deg2rad(const double deg)
   return deg * M_PI / 180.0;
 }
 
+// 创建长度为 STATE_SIZE 的全零 update vector。
+// 某一状态对应元素为 0 时，该 measurement 不会直接观测该状态变量。
 std::vector<int> makeEmptyUpdateVector()
 {
   return std::vector<int>(RobotLocalization::STATE_SIZE, 0);
 }
 
+// 当前绝对位姿观测只融合二维平面中的 x、y 和 yaw。
+// z、roll、pitch 以及所有速度和加速度状态不由该 pose measurement 直接观测。
+// two_d_mode 会在 robot_localization 内部进一步约束三维状态。
 std::vector<int> makePoseUpdateVector()
 {
   std::vector<int> update_vector = makeEmptyUpdateVector();
@@ -76,6 +122,9 @@ std::vector<int> makePoseUpdateVector()
   return update_vector;
 }
 
+// 当前 twist 观测配置为 vx、vy 和 yaw rate。
+// nav_msgs::Odometry 中的 twist 按 ROS 语义应表达在 child_frame_id 坐标系。
+// 如果数据实际不位于 base_link，必须先完成正确的坐标变换，不能只修改 frame 字符串。
 std::vector<int> makeTwistUpdateVector()
 {
   std::vector<int> update_vector = makeEmptyUpdateVector();
@@ -85,11 +134,16 @@ std::vector<int> makeTwistUpdateVector()
   return update_vector;
 }
 
+// 统计 update vector 中启用的状态数量。
+// CallbackData 使用该数量判断 pose 或 twist measurement 是否包含有效观测分量。
 int updateSum(const std::vector<int> &update_vector)
 {
   return std::accumulate(update_vector.begin(), update_vector.end(), 0);
 }
 
+// 构造 robot_localization 的 measurement callback 配置。
+// 当前 pose/twist 均按绝对、非 relative、非 differential 方式进入 EKF。
+// rejection_threshold 为 Mahalanobis 距离门限，不是普通的米或弧度误差门限。
 RobotLocalization::CallbackData makeCallbackData(
   const std::string &topic_name,
   const std::vector<int> &update_vector,
@@ -104,15 +158,26 @@ bool hasPolicy(const unsigned long long policy, const LocalizationPolicy flag)
   return (policy & static_cast<unsigned long long>(flag)) != 0;
 }
 
+// 将 EKF 输出的 variance 转换为标准差，供 LocalizationEstimate 不确定度字段使用。
+// max(0, variance) 用于避免数值误差产生轻微负方差后执行 sqrt 导致 NaN。
 double standardDeviation(const double variance)
 {
   return std::sqrt(std::max(0.0, variance));
 }
 
+// 检查绝对位姿是否具备进入 EKF 或用于初始化的基本条件：
+// - 时间戳非零；
+// - position 各分量为有限数；
+// - quaternion 各分量为有限数；
+// - quaternion 模长不能接近零。
+//
+// 此处只做格式和数值合法性检查，不判断定位结果的实际精度、跳变或漂移。
 bool isValidAbsolutePose(const nav_msgs::Odometry &odom)
 {
   const geometry_msgs::Point &position = odom.pose.pose.position;
   const geometry_msgs::Quaternion &orientation = odom.pose.pose.orientation;
+  // 不要求输入四元数在这里严格归一化，但必须排除全零或接近全零四元数。
+  // robot_localization 在后续处理中会对轻微未归一化的四元数进行归一化。
   const double quaternion_norm_squared =
     orientation.x * orientation.x + orientation.y * orientation.y +
     orientation.z * orientation.z + orientation.w * orientation.w;
@@ -128,6 +193,10 @@ bool isValidAbsolutePose(const nav_msgs::Odometry &odom)
          quaternion_norm_squared > 1e-12;
 }
 
+// 检查整条 Odometry 的 pose 和 twist 字段是否均为有限数。
+// 当前实现仍按整条消息进行校验：即使某个 twist 分量未参与融合，
+// 该分量若为 NaN，也会导致整条消息被拒绝。
+// 当前上游 INS 使用数值 0 填充 twist，因此不会触发该问题。
 bool isFiniteOdometry(const nav_msgs::Odometry &odom)
 {
   const geometry_msgs::Vector3 &linear = odom.twist.twist.linear;
@@ -137,12 +206,24 @@ bool isFiniteOdometry(const nav_msgs::Odometry &odom)
          std::isfinite(angular.x) && std::isfinite(angular.y) && std::isfinite(angular.z);
 }
 
+// 清除上游消息携带的完整 pose/twist covariance。
+// 后续将根据 SourceMode 写入本节点定义的对角观测方差。
+//
+// 影响：
+// - 上游动态质量变化不会直接保留；
+// - 上游提供的非对角相关项会被清除；
+// - 最终 Kalman 增益主要由本节点配置的固定方差决定。
 void clearCovariances(nav_msgs::Odometry &odom)
 {
   std::fill(odom.pose.covariance.begin(), odom.pose.covariance.end(), 0.0);
   std::fill(odom.twist.covariance.begin(), odom.twist.covariance.end(), 0.0);
 }
 
+// 设置 pose measurement 的对角观测方差。
+// 参数均为 variance，而不是 standard deviation：
+// - xy_var 单位为 m²；
+// - yaw_var 单位为 rad²；
+// - z、roll、pitch 当前不作为主要二维观测，使用较大方差占位。
 void setPoseCov(
   nav_msgs::Odometry &odom,
   const double xy_var,
@@ -158,6 +239,10 @@ void setPoseCov(
   odom.pose.covariance[35] = yaw_var;
 }
 
+// 设置 twist measurement 的对角观测方差。
+// 参数均为 variance，而不是 standard deviation：
+// - vxy_var 单位为 (m/s)²；
+// - vyaw_var 单位为 (rad/s)²。
 void setTwistCov(
   nav_msgs::Odometry &odom,
   const double vxy_var,
@@ -214,14 +299,21 @@ const char *modeToString(const SourceMode mode)
 class LocEkfNode
 {
 public:
+  // 默认关闭 INS twist 融合。
+  // 当前 /localization/ins 的 pose 有效，但 twist 长期为零，
+  // 该零值不是可靠的车辆静止观测。
   LocEkfNode()
     : nh_(),
       nh_priv_("~"),
       ekf_(nh_, nh_priv_, "loc_ekf_node"),
       state_timeout_sec_(1.0),
+      // INS 默认提供 x/y/yaw 绝对位姿观测。
       ins_pose_cb_data_(makeCallbackData("ins_pose", makePoseUpdateVector(), 5.0)),
+      // INS twist 默认使用全零 update vector，不向 EKF 添加速度观测。
       ins_twist_cb_data_(makeCallbackData("ins_twist", makeEmptyUpdateVector(), 3.0)),
+      // LIO 当前提供 x/y/yaw 绝对位姿观测。
       fusion_pose_cb_data_(makeCallbackData("fusion_pose", makePoseUpdateVector(), 3.0)),
+      // LIO 当前提供 vx/vy/yaw rate 速度观测。
       fusion_twist_cb_data_(makeCallbackData("fusion_twist", makeTwistUpdateVector(), 3.0))
   {
     loadParams();
@@ -263,6 +355,9 @@ private:
     ros::Time last_policy_stamp;
   };
 
+  // 加载节点私有参数。
+  // 由于 run.launch 先加载 loc_ekf.yaml，再可能通过 <param> 覆盖同名参数，
+  // 分析现场实际配置时应以 rosparam 中最终值为准，不能只查看 YAML 文件。
   void loadParams()
   {
     nh_priv_.param("ins_odom_topic", ins_topic_, std::string("/localization/ins"));
@@ -274,6 +369,8 @@ private:
     nh_priv_.param("state_timeout_sec", state_timeout_sec_, 1.0);
     nh_priv_.param("ins_pose_rejection_threshold", ins_pose_rejection_threshold_, 5.0);
     nh_priv_.param("ins_twist_rejection_threshold", ins_twist_rejection_threshold_, 3.0);
+    // 仅当上游 INS 确实提供经过验证、坐标系正确且时间同步的速度时才能开启。
+    // 不能仅因为字段存在或数值为零就认为该 twist 是有效观测。
     nh_priv_.param("fuse_ins_twist", fuse_ins_twist_, false);
     nh_priv_.param("fusion_pose_rejection_threshold", fusion_pose_rejection_threshold_, 3.0);
     nh_priv_.param("fusion_twist_rejection_threshold", fusion_twist_rejection_threshold_, 3.0);
@@ -293,6 +390,8 @@ private:
     nh_priv_.param("fusion_primary_vyaw_std_deg", fusion_primary_vyaw_std_deg_, 0.5);
     input_queue_size_ = std::max(1, input_queue_size_);
     output_queue_size_ = std::max(1, output_queue_size_);
+    // 防止除零或创建非法周期定时器。
+    // 参数异常时回退到 100 Hz 默认输出频率。
     if (localization_estimate_frequency_ <= 0.0)
     {
       ROS_WARN("localization_estimate_frequency must be positive; using 100 Hz");
@@ -300,10 +399,16 @@ private:
     }
   }
 
+  // 根据当前参数生成各数据源的 pose/twist update vector。
+  // update vector 决定某一 measurement 能够直接校正 EKF 中的哪些状态。
   void configureCallbackData()
   {
     const std::vector<int> pose_update_vector = makePoseUpdateVector();
     const std::vector<int> fusion_twist_update_vector = makeTwistUpdateVector();
+    // 关闭 INS twist 时必须使用全零 update vector，
+    // 而不是给零速度配置一个很大的 covariance。
+    // 全零 update vector 表示该 measurement 不存在，
+    // 大 covariance 仍然表示存在一个低权重的零速度观测。
     const std::vector<int> ins_twist_update_vector =
       fuse_ins_twist_ ? makeTwistUpdateVector() : makeEmptyUpdateVector();
 
@@ -315,16 +420,45 @@ private:
       makeCallbackData("fusion_pose", pose_update_vector, fusion_pose_rejection_threshold_);
     fusion_twist_cb_data_ =
       makeCallbackData("fusion_twist", fusion_twist_update_vector, fusion_twist_rejection_threshold_);
+
+    // 当前默认观测关系：
+    //   INS  → x、y、yaw
+    //   LIO  → x、y、yaw、vx、vy、yaw rate
+    //
+    // INS 速度由连续 pose 创新及 position-velocity cross covariance 间接估计，
+    // 不再被上游无效零 twist 持续拉回零。
   }
 
   void normalizeOdomFrame(nav_msgs::Odometry &odom) const
   {
     // This only normalizes frame labels; it does not transform twist values.
     // INS twist is disabled by default, isolating it from this known frame risk.
+    // 注意：该函数只统一消息中的 frame 标签，不执行真正的坐标变换。
+    //
+    // 修改 header.frame_id 并不会自动变换 pose 数值；
+    // 修改 child_frame_id 也不会自动旋转 twist、处理杆臂速度或转换 covariance。
+    //
+    // 只有在确认：
+    //   1. 输入 pose 数值已经表达在 frame_id_ 对应坐标系；
+    //   2. 启用的 twist 数值已经表达在 child_frame_id_ 对应坐标系；
+    // 才能安全地只修改标签。
+    //
+    // 当前 INS twist 默认关闭，因此 INS 的零速度不会因重写 child_frame_id
+    // 而被当成 base_link 速度送入 EKF。
+    // LIO twist 仍启用，必须保证上游 LIO 输出的速度语义符合 base_link。
     odom.header.frame_id = frame_id_;
     odom.child_frame_id = child_frame_id_;
   }
 
+  // 对输入消息执行基础保护，避免非法或时间异常数据进入 EKF。
+  //
+  // 检查顺序：
+  // 1. pose/twist 是否包含 NaN 或 Inf；
+  // 2. 消息时间是否比当前时间落后过多；
+  // 3. 消息时间是否明显位于未来。
+  //
+  // age 使用 ros::Time::now() 与消息 header.stamp 计算，
+  // 因此要求 header.stamp 表示真实测量时间，而不是回调接收时间。
   bool validateInput(
     const nav_msgs::Odometry &odom,
     const char *source_name,
@@ -341,6 +475,8 @@ private:
 
     const double age_sec = (ros::Time::now() - odom.header.stamp).toSec();
     last_age_sec.store(age_sec, std::memory_order_relaxed);
+    // 消息延迟超过 max_input_age_sec_ 时直接丢弃，
+    // 防止严重滞后的绝对位姿对当前状态产生大幅回拉。
     if (age_sec > max_input_age_sec_)
     {
       ++stale_count;
@@ -348,6 +484,8 @@ private:
         1.0, "Dropping stale " << source_name << ": age=" << age_sec << " s");
       return false;
     }
+    // 允许少量时钟和调度误差，但拒绝明显超前于本机 ROS 时间的测量。
+    // 大量 future-dated 消息通常意味着设备时钟或时间同步配置异常。
     if (age_sec < -max_future_stamp_sec_)
     {
       ++invalid_count;
@@ -358,6 +496,8 @@ private:
     return true;
   }
 
+  // 使用第一条通过检查的绝对 pose 初始化 EKF。
+  // 初始化只设置绝对位姿，不使用同一条消息中的 twist。
   bool initializeFromAbsolutePose(
     const nav_msgs::Odometry &odom,
     const std::string &source_name)
@@ -375,6 +515,8 @@ private:
       new geometry_msgs::PoseWithCovarianceStamped());
     initial_pose->header = odom.header;
     initial_pose->pose = odom.pose;
+    // 通过 robot_localization 标准 set_pose 接口初始化状态和协方差，
+    // 避免在自定义节点中直接操作 EKF 内部状态。
     ekf_.setPoseCallback(initial_pose);
     absolute_pose_initialized_ = true;
 
@@ -386,10 +528,15 @@ private:
     return true;
   }
 
+  // 获取当前定位状态和策略快照，并检查其新鲜度。
+  // 状态或策略任一超时，都按 LOST + NO_LOCALIZATION 处理，
+  // 防止控制话题停止更新后继续沿用历史选源结果。
   LocDecision currentDecision() const
   {
     LocDecision decision = loc_decision_;
     const ros::Time now = ros::Time::now();
+    // last_status_stamp 和 last_policy_stamp 记录的是本节点收到控制消息的 ROS 时间，
+    // 不是消息内部测量时间，因为 UInt8/UInt64 消息没有 header。
     const bool status_timeout =
       decision.last_status_stamp.isZero() ||
       (now - decision.last_status_stamp).toSec() > state_timeout_sec_;
@@ -406,6 +553,17 @@ private:
     return decision;
   }
 
+  // 根据定位状态和策略决定 INS pose 的观测权重。
+  //
+  // 主要逻辑：
+  // - LOST/DR：不使用 INS 绝对 pose；
+  // - NORMAL + USE_FUSION_ODOM：LIO 为主，INS 不参与；
+  // - USE_GNSS 且 NORMAL/SECONDARY：INS 为主；
+  // - USE_GNSS 且 NOT_STABLE：INS 降级参与；
+  // - USE_FUSION_ODOM 的其他允许状态：INS 作为弱约束。
+  //
+  // 当前函数返回的是整条 INS 数据源的模式，但由于 INS twist 默认关闭，
+  // 实际受该模式影响的主要是 INS x/y/yaw pose covariance。
   SourceMode selectInsMode(const LocDecision &decision) const
   {
     if (decision.status == LocalizationStatus::LOST ||
@@ -442,6 +600,13 @@ private:
     return SourceMode::DROP;
   }
 
+  // 根据定位状态和策略决定 LIO pose/twist 的观测权重。
+  //
+  // SECONDARY + USE_GNSS 时明确 DROP LIO，避免已被 switcher 判定异常的
+  // LIO 仍作为弱观测持续拉动 final_odom。
+  // NORMAL + USE_FUSION_ODOM 时 LIO 为主；
+  // NOT_STABLE 时使用 DEGRADED；
+  // GNSS 策略下通常只作为 WEAK 后备约束。
   SourceMode selectFusionMode(const LocDecision &decision) const
   {
     if (decision.status == LocalizationStatus::LOST ||
@@ -481,6 +646,12 @@ private:
     return SourceMode::DROP;
   }
 
+  // 按当前 SourceMode 重写 INS 观测协方差。
+  // covariance 越小，EKF 越信任该观测，校正幅度通常越大；
+  // covariance 越大，观测对预测状态的拉动越弱。
+  //
+  // 当前 INS twist 默认关闭，因此 setTwistCov 写入的数值通常不会参与校正，
+  // 但予以保留，以支持未来人工开启 fuse_ins_twist。
   void applyInsCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
@@ -488,22 +659,32 @@ private:
     switch (mode)
     {
       case SourceMode::PRIMARY:
+        // PRIMARY：可信 INS 绝对位姿，允许较强校正。
         setPoseCov(odom, 0.02, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         setTwistCov(odom, 0.05, 100.0, 100.0, std::pow(deg2rad(0.5), 2.0));
         break;
       case SourceMode::WEAK:
+        // WEAK：仅作为弱约束，避免与主定位源明显竞争。
         setPoseCov(odom, 10.0, 100.0, 100.0, std::pow(deg2rad(10.0), 2.0));
         setTwistCov(odom, 0.50, 100.0, 100.0, std::pow(deg2rad(5.0), 2.0));
         break;
       case SourceMode::DEGRADED:
+        // DEGRADED：INS 质量下降，方差介于 PRIMARY 与 WEAK 之间。
         setPoseCov(odom, 1.0, 100.0, 100.0, std::pow(deg2rad(3.0), 2.0));
         setTwistCov(odom, 0.20, 100.0, 100.0, std::pow(deg2rad(2.0), 2.0));
         break;
       case SourceMode::DROP:
+        // DROP：调用方会在进入此函数前直接丢弃消息。
         break;
     }
   }
 
+  // 按当前 SourceMode 重写 LIO pose 和 twist 的观测协方差。
+  // PRIMARY 模式的关键方差由 YAML 参数提供，便于现场调试；
+  // WEAK 和 DEGRADED 当前使用代码中的固定值。
+  //
+  // 当前会清除上游 LIO 原始 covariance，
+  // 因此上游算法实时输出的质量变化不会直接保留到 EKF。
   void applyFusionCovariance(nav_msgs::Odometry &odom, const SourceMode mode) const
   {
     clearCovariances(odom);
@@ -531,6 +712,11 @@ private:
     }
   }
 
+  // 启动阶段尚未获得绝对 pose 时，INS 或 LIO 中先到达的有效消息都可能触发初始化。
+  // 初始化暂时不依赖 status/policy，避免状态和策略话题尚未到达时 EKF 无法启动。
+  //
+  // 当前行为意味着初始化数据源由消息到达顺序决定，
+  // 并不保证一定由当前策略选择的 PRIMARY 数据源完成初始化。
   bool initializeIfNeeded(
     const nav_msgs::Odometry &odom,
     const std::string &source_name,
@@ -547,6 +733,8 @@ private:
     nav_msgs::Odometry initial_pose(odom);
     // Initialization must not depend on startup status/policy messages. Use
     // the trusted absolute-pose covariance for the selected source.
+    // 初始化使用该数据源的 PRIMARY pose covariance，
+    // 避免用 WEAK 或 DEGRADED 方差初始化出过大的初始不确定度。
     if (is_ins)
     {
       applyInsCovariance(initial_pose, SourceMode::PRIMARY);
@@ -560,6 +748,17 @@ private:
     return initialized_now;
   }
 
+  // INS 数据处理流程：
+  // 1. 检查消息合法性和时间新鲜度；
+  // 2. 复制消息并统一 frame 标签；
+  // 3. 必要时使用 INS pose 初始化 EKF；
+  // 4. 根据当前 status/policy 选择 INS 模式；
+  // 5. DROP 时不送入 EKF；
+  // 6. 重写 covariance；
+  // 7. 通过 RosEkf::odometryCallback 送入 measurement queue。
+  //
+  // fuse_ins_twist=false 时，odometryCallback 虽然仍接收 twist CallbackData，
+  // 但其 update vector 全部为零，不会形成有效的 INS 速度观测。
   void insCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
     if (!msg || !validateInput(
@@ -600,10 +799,16 @@ private:
 
     applyInsCovariance(*out, ins_mode);
 
+    // 这里设置的 twist covariance 不代表 twist 一定会被融合。
+    // 是否融合最终由 ins_twist_cb_data_ 中的 update vector 决定。
+
     ekf_.odometryCallback(out, "ins_odom", ins_pose_cb_data_, ins_twist_cb_data_);
     logStatus(decision, ins_mode, fusion_mode);
   }
 
+  // LIO 数据处理流程与 INS 基本一致。
+  // 当前 LIO pose 和 twist 均启用，因此必须确保二者时间戳、坐标系和单位一致。
+  // 如果 pose 和 twist 来源于同一个 LIO 内部估计器，二者可能存在信息相关性。
   void fusionCb(const nav_msgs::Odometry::ConstPtr &msg)
   {
     if (!msg || !validateInput(
@@ -644,10 +849,14 @@ private:
 
     applyFusionCovariance(*out, fusion_mode);
 
+    // 当前一次 LIO Odometry 会被 robot_localization 拆分成 pose 和 twist 两条 measurement，
+    // 两者使用同一个 header.stamp，并分别执行观测校正。
     ekf_.odometryCallback(out, "fusion_odom", fusion_pose_cb_data_, fusion_twist_cb_data_);
     logStatus(decision, ins_mode, fusion_mode);
   }
 
+  // 更新定位健康状态。
+  // 使用互斥锁保证状态回调、策略回调和传感器回调读取到一致的决策数据。
   void localizationStatusCb(const std_msgs::UInt8::ConstPtr &msg)
   {
     std::lock_guard<std::mutex> lock(state_mtx_);
@@ -655,6 +864,8 @@ private:
     loc_decision_.last_status_stamp = ros::Time::now();
   }
 
+  // 更新定位策略位掩码。
+  // 实际选源逻辑在传感器消息到达时执行，而不是在策略消息回调中立即修改 EKF。
   void locPolicyCb(const std_msgs::UInt64::ConstPtr &msg)
   {
     std::lock_guard<std::mutex> lock(state_mtx_);
@@ -662,10 +873,19 @@ private:
     loc_decision_.last_policy_stamp = ros::Time::now();
   }
 
+  // 定时处理 EKF measurement queue，并发布当前滤波状态。
+  //
+  // processMeasurementsAndGetState() 会：
+  // 1. 按测量时间戳顺序处理已经入队的 pose/twist；
+  // 2. 在相邻测量时间之间执行预测；
+  // 3. 对每条观测执行 Kalman 校正；
+  // 4. 根据 predict_to_current_time 配置决定是否继续预测到 cycle_time。
   void publishLocalizationEstimate(const ros::TimerEvent &)
   {
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     const ros::Time cycle_time = ros::Time::now();
+    // rosbag loop 或仿真时间重置可能导致 ROS 时间倒退。
+    // 此时清空 wrapper 层的输出时间单调性记录，让底层 RosFilter 自行处理时间重置。
     if (!last_cycle_time_.isZero() && cycle_time < last_cycle_time_)
     {
       // rosbag loops and repeated simulated-time tests legitimately jump back.
@@ -677,9 +897,13 @@ private:
     geometry_msgs::AccelWithCovarianceStamped acceleration;
     if (!ekf_.processMeasurementsAndGetState(cycle_time, odom, &acceleration))
     {
+      // EKF 尚未初始化或当前无法生成有效状态时，本周期不发布。
       return;
     }
 
+    // 禁止发布时间戳小于上一输出的 final_odom，
+    // 防止下游控制、轨迹缓存或 TF 消费者接收到时间倒序数据。
+    // 当前判断允许相同时间戳再次发布。
     if (!last_output_stamp_.isZero() && odom.header.stamp < last_output_stamp_)
     {
       ++output_regression_count_;
@@ -697,6 +921,21 @@ private:
 
     // nav_msgs/Odometry twist is expressed in child_frame_id. Convert it to
     // the world frame for the corresponding UDI pose fields.
+    // nav_msgs::Odometry 约定：
+    // - pose 表达在 header.frame_id；
+    // - twist 表达在 child_frame_id。
+    //
+    // EKF 输出 twist 当前按 base_link/车辆坐标系解释：
+    //   vx_vrf：车辆前向速度
+    //   vy_vrf：车辆横向速度
+    //
+    // LocalizationEstimate 同时需要地图坐标系速度，
+    // 因此使用当前 yaw 将二维车体系速度旋转到 map：
+    //   vx_map = cos(yaw) * vx_vrf - sin(yaw) * vy_vrf
+    //   vy_map = sin(yaw) * vx_vrf + cos(yaw) * vy_vrf
+    //
+    // 这里假设 child_frame_id 与 base_link 对齐，
+    // 不包含额外传感器安装角或杆臂补偿。
     const double vx_vrf = odom.twist.twist.linear.x;
     const double vy_vrf = odom.twist.twist.linear.y;
     const double vz_vrf = odom.twist.twist.linear.z;
@@ -727,11 +966,18 @@ private:
     estimate.pose.linear_velocity_vrf.y = vy_vrf;
     estimate.pose.linear_velocity_vrf.z = vz_vrf;
 
+    // 当前角速度直接使用 EKF 输出值。
+    // 对二维车辆主要关注 angular.z，即 yaw rate。
     estimate.pose.angular_velocity.x = odom.twist.twist.angular.x;
     estimate.pose.angular_velocity.y = odom.twist.twist.angular.y;
     estimate.pose.angular_velocity.z = odom.twist.twist.angular.z;
     estimate.pose.angular_velocity_vrf = estimate.pose.angular_velocity;
 
+    // EKF 内部线加速度状态按车辆坐标系解释，
+    // 与速度相同，使用 yaw 旋转得到 map 坐标系加速度。
+    //
+    // angular 字段在这里用于传递 EKF 估计的角运动相关量，
+    // 不应与独立 IMU 原始角加速度混淆。
     if (has_acceleration)
     {
       const double ax_vrf = acceleration.accel.accel.linear.x;
@@ -748,6 +994,9 @@ private:
       estimate.pose.angular_velocity_vrf.z = acceleration.accel.accel.angular.z;
     }
 
+    // nav_msgs::Odometry covariance 对角线保存的是方差；
+    // LocalizationEstimate uncertainty 字段需要标准差，
+    // 因此统一执行 sqrt 转换。
     estimate.uncertainty.position_std_dev.x = standardDeviation(odom.pose.covariance[0]);
     estimate.uncertainty.position_std_dev.y = standardDeviation(odom.pose.covariance[7]);
     estimate.uncertainty.position_std_dev.z = standardDeviation(odom.pose.covariance[14]);
@@ -786,6 +1035,16 @@ private:
     logRuntimeStatus(cycle_time, odom);
   }
 
+  // 输出节点运行健康信息，包括：
+  // - final_odom 相对当前时间的延迟；
+  // - 最近接收的 INS/LIO 消息延迟；
+  // - 单次输出回调耗时；
+  // - 输出次数和超周期次数；
+  // - 时间戳回退次数；
+  // - 非法或超时输入计数。
+  //
+  // 该日志主要反映数据链路与计算调度状态，
+  // 不直接表示定位精度是否满足业务要求。
   void logRuntimeStatus(const ros::Time &now, const nav_msgs::Odometry &odom)
   {
     const double ins_stamp = last_ins_accepted_stamp_sec_.load(std::memory_order_relaxed);
@@ -810,6 +1069,9 @@ private:
         << " lio_invalid/stale=" << fusion_invalid_count_.load() << "/" << fusion_stale_count_.load());
   }
 
+  // 节流输出当前状态、策略以及 INS/LIO 选源结果。
+  // ins_in/fusion_in 表示通过基础校验后进入策略判断的消息数量，
+  // drop 表示因当前定位策略而未送入 EKF 的消息数量。
   void logStatus(
     const LocDecision &decision,
     const SourceMode ins_mode,
@@ -827,8 +1089,11 @@ private:
                                         << " fusion_drop=" << fusion_drop_count_);
   }
 
+  // ROS 通信对象。
   ros::NodeHandle nh_;
   ros::NodeHandle nh_priv_;
+
+  // robot_localization EKF 实例。
   RobotLocalization::RosEkf ekf_;
 
   ros::Subscriber ins_sub_;
@@ -839,11 +1104,13 @@ private:
   ros::Publisher filtered_odom_pub_;
   ros::Timer localization_estimate_timer_;
 
+  // 定位状态与策略共享数据。
   mutable std::mutex state_mtx_;
   LocDecision loc_decision_;
   bool absolute_pose_initialized_ = false;
   bool fuse_ins_twist_ = false;
 
+  // Topic 与 frame 配置。
   std::string ins_topic_;
   std::string fusion_topic_;
   std::string localization_status_topic_;
@@ -852,6 +1119,7 @@ private:
   std::string child_frame_id_;
   std::string localization_estimate_topic_;
 
+  // 输入有效性、状态新鲜度和时间保护参数。
   double state_timeout_sec_;
   double localization_estimate_frequency_ = 100.0;
   int input_queue_size_ = 5;
@@ -859,20 +1127,24 @@ private:
   double max_input_age_sec_ = 0.5;
   double max_future_stamp_sec_ = 0.05;
   double hard_stale_warn_sec_ = 1.0;
+  // LIO PRIMARY 观测方差参数。
   double fusion_primary_xy_variance_ = 0.0005;
   double fusion_primary_vxy_variance_ = 0.005;
   double fusion_primary_yaw_std_deg_ = 0.5;
   double fusion_primary_vyaw_std_deg_ = 0.5;
+  // 各观测的 Mahalanobis rejection threshold。
   double ins_pose_rejection_threshold_ = 5.0;
   double ins_twist_rejection_threshold_ = 3.0;
   double fusion_pose_rejection_threshold_ = 3.0;
   double fusion_twist_rejection_threshold_ = 3.0;
 
+  // 各数据源 CallbackData。
   RobotLocalization::CallbackData ins_pose_cb_data_;
   RobotLocalization::CallbackData ins_twist_cb_data_;
   RobotLocalization::CallbackData fusion_pose_cb_data_;
   RobotLocalization::CallbackData fusion_twist_cb_data_;
 
+  // 运行统计计数器。
   std::atomic<uint64_t> ins_count_{0};
   std::atomic<uint64_t> ins_drop_count_{0};
   std::atomic<uint64_t> fusion_count_{0};
@@ -889,6 +1161,7 @@ private:
   std::atomic<double> last_ins_accepted_stamp_sec_{0.0};
   std::atomic<double> last_fusion_accepted_stamp_sec_{0.0};
   std::atomic<double> last_execution_ms_{0.0};
+  // 输出时间单调性保护。
   ros::Time last_output_stamp_;
   ros::Time last_cycle_time_;
   uint32_t localization_estimate_sequence_ = 0;
@@ -898,6 +1171,12 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "loc_ekf_node");
   LocEkfNode node;
+  // 使用两个 callback 线程，使传感器输入和定时输出可以并发调度。
+  // RosEkf 内部通过递归互斥锁保护 measurement queue 和滤波状态；
+  // 本节点的 status/policy 数据另外由 state_mtx_ 保护。
+  //
+  // 增加线程数不能提高传感器自身更新频率，
+  // 只能减少长回调对其他订阅和定时器的阻塞。
   ros::AsyncSpinner spinner(2);
   spinner.start();
   ros::waitForShutdown();

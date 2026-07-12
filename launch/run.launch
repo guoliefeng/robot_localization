@@ -13,6 +13,11 @@
         name="yangpu_loc_ekf"
         output="log"
         clear_params="true">
+    <!--
+      先加载 loc_ekf.yaml 中的默认配置。
+      如果后面再次使用 <param> 设置同名参数，后面的值会覆盖 YAML。
+      因此排查实际参数时应使用 rosparam get，而不能只查看 YAML。
+    -->
     <rosparam command="load" file="$(arg ekf_config)" />
 
     <param name="ins_odom_topic" value="/localization/ins" />
@@ -22,10 +27,20 @@
     <param name="publish_filtered_odometry" value="false" />
     <param name="internal_periodic_update" value="false" />
     <param name="enable_set_pose_interface" value="false" />
+    <!--
+      当前 launch 显式覆盖 YAML 中的 predict_to_current_time。
+      true 表示处理完最新 measurement 后，可继续将状态预测到本次输出 cycle_time。
+      该模式要求速度状态可靠，并需要关注延迟观测和滤波器内部时间的一致性。
+    -->
     <param name="predict_to_current_time" value="true" />
     <param name="input_queue_size" value="$(arg input_queue_size)" />
     <param name="output_queue_size" value="$(arg output_queue_size)" />
 
+    <!--
+      输出 pose 使用 map，输出 twist 按 base_link/车辆坐标系解释。
+      自定义节点当前只重写 frame 标签，不执行完整 TF 坐标变换，
+      因此上游数据必须满足对应的坐标系语义。
+    -->
     <param name="frame_id" value="map" />
     <param name="child_frame_id" value="base_link" />
 
