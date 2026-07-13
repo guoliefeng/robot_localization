@@ -376,7 +376,7 @@ private:
     nh_priv_.param("fusion_twist_rejection_threshold", fusion_twist_rejection_threshold_, 3.0);
     nh_priv_.param(
       "localization_estimate_topic", localization_estimate_topic_,
-      std::string("/localization_estimate1"));
+      std::string("/localization_estimate"));
     nh_priv_.param(
       "localization_estimate_frequency", localization_estimate_frequency_, 100.0);
     nh_priv_.param("input_queue_size", input_queue_size_, 5);

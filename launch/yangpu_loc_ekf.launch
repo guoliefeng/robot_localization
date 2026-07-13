@@ -25,6 +25,7 @@
     <param name="child_frame_id" value="base_link" />
 
     <remap from="odometry/filtered" to="/localization/final_odom1" />
+    <remap from="/localization_estimate" to="/localization_estimate_fusion_test" />
   </node>
 
   
@@ -52,5 +53,7 @@
               /localization_switcher/fusion_loc/jump_distance
               /localization_switcher/fusion_loc/fake_gnss 
               /localization/final_odom1
-              /lio_loc_result" />
+              /lio_loc_result
+              /localization_estimate_fusion_test
+              /localization_estimate" />
 </launch>

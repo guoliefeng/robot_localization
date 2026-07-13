@@ -32,7 +32,6 @@
       true 表示处理完最新 measurement 后，可继续将状态预测到本次输出 cycle_time。
       该模式要求速度状态可靠，并需要关注延迟观测和滤波器内部时间的一致性。
     -->
-    <param name="predict_to_current_time" value="true" />
     <param name="input_queue_size" value="$(arg input_queue_size)" />
     <param name="output_queue_size" value="$(arg output_queue_size)" />
 
@@ -45,5 +44,7 @@
     <param name="child_frame_id" value="base_link" />
 
     <remap from="odometry/filtered" to="$(arg filtered_odom_topic)" />
+    <!-- <remap from="/localization_estimate" to="/localization_estimate_fusion_test" /> -->
+
   </node>
 </launch>
