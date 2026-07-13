@@ -955,9 +955,9 @@ private:
     estimate.pose.orientation.qz = odom.pose.pose.orientation.z;
     estimate.pose.orientation.qw = odom.pose.pose.orientation.w;
     estimate.pose.heading = yaw;
-    estimate.pose.euler_angles.x = yaw;
+    estimate.pose.euler_angles.x = roll;
     estimate.pose.euler_angles.y = pitch;
-    estimate.pose.euler_angles.z = roll;
+    estimate.pose.euler_angles.z = yaw;
 
     estimate.pose.linear_velocity.x = vx_map;
     estimate.pose.linear_velocity.y = vy_map;
