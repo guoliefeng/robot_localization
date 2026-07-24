@@ -3,7 +3,7 @@
   <arg name="set_use_sim_time" default="true" />
   <arg name="ekf_config" default="$(find robot_loc)/params/loc_ekf.yaml" />
 
-    <arg name="output_dir" default="/home/guoli/data/yangpu/0712/test" />
+    <arg name="output_dir" default="/home/guoli/data/yangpu/0724/test" />
   <arg name="output_prefix" default="$(arg output_dir)/227" />
   <arg name="record" default="true" />
 
@@ -52,6 +52,7 @@
               /localization/abnormal_code/text
               /localization_switcher/fusion_loc/jump_distance
               /localization_switcher/fusion_loc/fake_gnss 
+              /localization/final_odom
               /localization/final_odom1
               /lio_loc_result
               /localization_estimate_fusion_test

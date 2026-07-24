@@ -1,10 +1,10 @@
 # frequency 是底层 EKF 的配置频率；localization_estimate_frequency 是
 # wrapper 更新并发布状态的定时器频率。二者都不代表传感器的真实测量频率。
 frequency: 100
-localization_estimate_frequency: 28
+localization_estimate_frequency: 100
 sensor_timeout: 0.2
 # run.launch 当前会用同名 <param> 覆盖此值，现场值应通过 rosparam 查询。
-predict_to_current_time: false
+predict_to_current_time: true
 reset_on_time_jump: true
 two_d_mode: true
 publish_tf: false
@@ -22,10 +22,10 @@ hard_stale_warn_sec: 1.0
 
 # LIO PRIMARY 响应参数。以下 covariance 数值均为 variance，不是标准差；
 # 继续减小可能改善响应，也可能增加抖动或 Mahalanobis 拒绝概率。
-fusion_primary_xy_variance: 0.0005
-fusion_primary_vxy_variance: 0.005
-fusion_primary_yaw_std_deg: 0.5
-fusion_primary_vyaw_std_deg: 0.5
+fusion_primary_xy_variance: 0.0025
+fusion_primary_vxy_variance: 0.01
+fusion_primary_yaw_std_deg: 0.8
+fusion_primary_vyaw_std_deg: 0.8
 debug: false
 debug_out_file: /tmp/yangpu_loc_ekf_debug.txt
 

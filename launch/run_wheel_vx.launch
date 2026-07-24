@@ -1,0 +1,93 @@
+<launch>
+  <!-- Match yangpu_loc_ekf.launch: bag playback is the default use case. -->
+  <arg name="use_sim_time" default="true" />
+  <arg name="set_use_sim_time" default="true" />
+  <arg name="ekf_config" default="$(find robot_loc)/params/loc_ekf.yaml" />
+  <arg name="wheel_config" default="$(find robot_loc)/params/run_wheel_vx.yaml" />
+  <arg name="filtered_odom_topic" default="/localization/final_odom1" />
+  <arg name="localization_estimate_topic" default="/localization_estimate_wheel_vx_test" />
+  <arg name="output_dir" default="/home/guoli/data/yangpu/0724/test" />
+  <arg name="output_prefix" default="$(arg output_dir)/227_wheel_vx" />
+  <arg name="record" default="true" />
+  <arg name="input_queue_size" default="5" />
+  <arg name="output_queue_size" default="5" />
+  <arg name="state_timeout_sec" default="1.0" />
+  <arg name="max_input_age_sec" default="0.5" />
+  <arg name="max_future_stamp_sec" default="0.05" />
+  <arg name="wheel_vx_enabled" default="true" />
+  <arg name="wheel_primary_vx_variance" default="0.05" />
+  <arg name="wheel_lio_vx_blend" default="0.25" />
+  <arg name="wheel_lio_vx_gate" default="0.03" />
+  <arg name="wheel_vx_replace_lio_vx" default="false" />
+
+  <param if="$(arg set_use_sim_time)" name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <node pkg="robot_loc"
+        type="run_ekf_node"
+        name="yangpu_run_ekf"
+        output="screen"
+        clear_params="true">
+    <rosparam command="load" file="$(arg ekf_config)" />
+    <rosparam command="load" file="$(arg wheel_config)" />
+
+    <param name="ins_odom_topic" value="/localization/ins" />
+    <param name="fusion_odom_topic" value="/lio_loc_result" />
+    <param name="wheel_odom_topic" value="/wheel_odom" />
+    <param name="localization_status_topic" value="/localization/status" />
+    <param name="loc_policy_topic" value="/localization/loc_policy_code" />
+    <param name="publish_filtered_odometry" value="false" />
+    <param name="internal_periodic_update" value="false" />
+    <param name="enable_set_pose_interface" value="false" />
+    <param name="input_queue_size" value="$(arg input_queue_size)" />
+    <param name="output_queue_size" value="$(arg output_queue_size)" />
+    <param name="state_timeout_sec" value="$(arg state_timeout_sec)" />
+    <param name="max_input_age_sec" value="$(arg max_input_age_sec)" />
+    <param name="max_future_stamp_sec" value="$(arg max_future_stamp_sec)" />
+
+    <!-- Launch arguments override the wheel defaults loaded above. -->
+    <param name="wheel_vx_enabled" value="$(arg wheel_vx_enabled)" />
+    <param name="wheel_primary_vx_variance" value="$(arg wheel_primary_vx_variance)" />
+    <param name="wheel_lio_vx_blend" value="$(arg wheel_lio_vx_blend)" />
+    <param name="wheel_lio_vx_gate" value="$(arg wheel_lio_vx_gate)" />
+    <param name="wheel_vx_replace_lio_vx" value="$(arg wheel_vx_replace_lio_vx)" />
+
+    <param name="frame_id" value="map" />
+    <param name="child_frame_id" value="base_link" />
+
+    <remap from="odometry/filtered" to="$(arg filtered_odom_topic)" />
+    <remap from="/localization_estimate" to="$(arg localization_estimate_topic)" />
+  </node>
+
+  <!--
+    Record the input observations, switcher decisions, reference data and both
+    old/new EKF outputs. /clock is required to reproduce simulated-time runs.
+    rosbag record -o appends a timestamp to output_prefix.
+  -->
+  <node pkg="rosbag" type="record" name="rosbag_record_run_wheel_vx" output="log"
+        if="$(arg record)"
+        args="-o $(arg output_prefix)
+              /clock
+              /lio_loc_result
+              /localization/status
+              /localization/lost_test
+              /localization/loc_status
+              /localization/ins
+              /udi_zpmc_loc_ns/loc_result_SEMANTIC_VOXELMAP
+              /udi_zpmc_loc_ns/ins_odom_huace
+              /wheel_odom
+              /wheel_imu_odom
+              /chcnav/devpvt
+              /ins_driver/imu
+              /localization/loc_policy_code
+              /localization/abnormal_code_array
+              /localization_switcher/error
+              /localization/status/text
+              /localization/policy/text
+              /localization/abnormal_code/text
+              /localization_switcher/fusion_loc/jump_distance
+              /localization_switcher/fusion_loc/fake_gnss
+              /localization/final_odom
+              $(arg filtered_odom_topic)
+              $(arg localization_estimate_topic)
+              /localization_estimate" />
+</launch>

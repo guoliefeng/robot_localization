@@ -1,0 +1,55 @@
+<launch>
+  <arg name="input_bag" />
+  <arg name="output_bag" />
+  <arg name="skip" default="2800" />
+  <arg name="duration" default="100" />
+  <arg name="rate" default="1.0" />
+  <arg name="wheel_vx_enabled" default="true" />
+  <arg name="wheel_primary_vx_variance" default="0.05" />
+  <arg name="wheel_lio_vx_blend" default="0.25" />
+  <arg name="wheel_lio_vx_gate" default="0.03" />
+  <arg name="wheel_vx_replace_lio_vx" default="false" />
+  <!-- rosbag /clock and sensor callbacks use separate connections. A clock
+       burst can otherwise make valid recorded inputs look future/stale. These
+       relaxed values are test-only; run_wheel_vx.launch keeps live defaults. -->
+  <arg name="input_queue_size" default="100" />
+  <arg name="state_timeout_sec" default="5.0" />
+  <arg name="max_input_age_sec" default="5.0" />
+  <arg name="max_future_stamp_sec" default="5.0" />
+
+  <param name="/use_sim_time" value="true" />
+
+  <include file="$(find robot_loc)/launch/run_wheel_vx.launch">
+    <arg name="set_use_sim_time" value="true" />
+    <arg name="use_sim_time" value="true" />
+    <!-- This launch has its own -O recorder below. -->
+    <arg name="record" value="false" />
+    <arg name="filtered_odom_topic" value="/localization/final_odom1" />
+    <arg name="wheel_vx_enabled" value="$(arg wheel_vx_enabled)" />
+    <arg name="wheel_primary_vx_variance" value="$(arg wheel_primary_vx_variance)" />
+    <arg name="wheel_lio_vx_blend" value="$(arg wheel_lio_vx_blend)" />
+    <arg name="wheel_lio_vx_gate" value="$(arg wheel_lio_vx_gate)" />
+    <arg name="wheel_vx_replace_lio_vx" value="$(arg wheel_vx_replace_lio_vx)" />
+    <arg name="input_queue_size" value="$(arg input_queue_size)" />
+    <arg name="state_timeout_sec" value="$(arg state_timeout_sec)" />
+    <arg name="max_input_age_sec" value="$(arg max_input_age_sec)" />
+    <arg name="max_future_stamp_sec" value="$(arg max_future_stamp_sec)" />
+  </include>
+
+  <node pkg="rosbag" type="record" name="wheel_vx_regression_record" output="log"
+        args="-O $(arg output_bag)
+              /clock
+              /localization/final_odom
+              /localization/final_odom1
+              /wheel_odom
+              /lio_loc_result
+              /localization/ins
+              /chcnav/devpvt
+              /ins_driver/imu
+              /localization/status
+              /localization/loc_policy_code" />
+
+  <!-- The delay gives the EKF and recorder time to subscribe before playback. -->
+  <node pkg="rosbag" type="play" name="wheel_vx_regression_play" output="log" required="true"
+        args="--clock --delay=1.0 -s $(arg skip) -u $(arg duration) -r $(arg rate) $(arg input_bag)" />
+</launch>

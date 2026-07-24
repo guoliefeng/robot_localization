@@ -1,0 +1,27 @@
+# Extra parameters for run_ekf_node.cpp. This file is intentionally separate
+# from loc_ekf.yaml so the legacy loc_ekf_node.cpp launch paths stay unchanged.
+
+# /wheel_odom.twist.linear.x is a direct base_link forward-speed observation.
+# Only this scalar is copied: the bag's remaining wheel covariance entries are
+# non-symmetric and must not be passed to the EKF as a 6x6 matrix.
+wheel_vx_rejection_threshold: 5.0
+wheel_vx_max_abs: 3.5
+
+# Manual master switch. Wheel availability/weight does not follow
+# /localization/status or /localization/loc_policy_code.
+wheel_vx_enabled: true
+
+# A synchronized blend keeps one vx observation instead of treating the highly
+# correlated LIO and wheel velocities as two independent measurements.
+wheel_vx_replace_lio_vx: false
+wheel_vx_timeout_sec: 0.15
+wheel_lio_vx_blend: 0.25
+wheel_lio_sync_tolerance_sec: 0.03
+
+# Reject short wheel-speed dips before forming the blended observation.
+# Set wheel_lio_vx_gate to 0 to disable this consistency gate.
+wheel_lio_vx_gate: 0.03
+wheel_lio_vx_gate_max_dt: 0.10
+
+# Standalone wheel variance, in (m/s)^2, used when LIO is not PRIMARY.
+wheel_primary_vx_variance: 0.25

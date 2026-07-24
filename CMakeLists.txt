@@ -161,6 +161,7 @@ add_executable(ukf_localization_node src/ukf_localization_node.cpp)
 add_executable(navsat_transform_node src/navsat_transform_node.cpp)
 add_executable(robot_localization_listener_node src/robot_localization_listener_node.cpp)
 add_executable(yangpu_loc_ekf_node src/loc_ekf_node.cpp)
+add_executable(run_ekf_node src/run_ekf_node.cpp)
 add_executable(loc_ekf_multi_sensor_node src/loc_ekf_multi_sensor_node.cpp)
 add_executable(loc_ekf_ins_imu_node src/loc_ekf_ins_imu_node.cpp)
 add_executable(loc_ekf_ins_imu_wheel_node src/loc_ekf_ins_imu_wheel_node.cpp)
@@ -173,6 +174,7 @@ add_dependencies(gnss_quality_monitor ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_T
 add_dependencies(gnss_quality_ins_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(robot_localization_listener_node ${PROJECT_NAME}_gencpp)
 add_dependencies(yangpu_loc_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
+add_dependencies(run_ekf_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(loc_ekf_multi_sensor_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(loc_ekf_ins_imu_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
 add_dependencies(loc_ekf_ins_imu_wheel_node ${PROJECT_NAME}_gencpp ${catkin_EXPORTED_TARGETS})
@@ -191,6 +193,7 @@ target_link_libraries(ros_robot_localization_listener robot_localization_estimat
   ${catkin_LIBRARIES} ${EIGEN3_LIBRARIES} ${YAML_CPP_LIBRARIES})
 target_link_libraries(robot_localization_listener_node ros_robot_localization_listener ${catkin_LIBRARIES})
 target_link_libraries(yangpu_loc_ekf_node ros_filter ${catkin_LIBRARIES})
+target_link_libraries(run_ekf_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(loc_ekf_multi_sensor_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(loc_ekf_ins_imu_node ros_filter ${catkin_LIBRARIES})
 target_link_libraries(loc_ekf_ins_imu_wheel_node ros_filter ${catkin_LIBRARIES})
@@ -230,6 +233,7 @@ install(TARGETS
   navsat_transform_node
   robot_localization_listener_node
   yangpu_loc_ekf_node
+  run_ekf_node
   loc_ekf_multi_sensor_node
   loc_ekf_ins_imu_node
   gnss_quality_ins_ekf_node
